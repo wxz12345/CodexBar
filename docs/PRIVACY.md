@@ -7,16 +7,20 @@ CodexBar 是完全在用户 Windows 电脑上运行的开源桌面工具。项�
 
 CodexBar 可能只读访问以下数据：
 
-- `~/.codex/auth.json`：检测完整的 ChatGPT OAuth 登录。该文件不会被修改。
-- Codex SQLite 和 rollout JSONL：统计本机 Codex 对话产生的 token 用量。
+- `$CODEX_HOME/auth.json`（未设置时为 `~/.codex/auth.json`）：检测完整的 ChatGPT OAuth 登录。该文件不会被修改。
+- Codex SQLite 和 rollout JSONL：任务栏或账本选择本机来源时，统计本机 Codex 对话产生的 token 用量。
 - 用户主动设置的模型价格、自定义 CA 证书和显示配置。
+
+Token 日志来源遵循 `CODEX_HOME`，默认 `~/.codex`，包括数据库索引和
+`sessions` / `archived_sessions` 目录。任务栏和账本每次只统计各自选定的本机或 SSH 来源；
+日志不按当前 OAuth 账号归属，也不自动汇总其他设备或云端任务。
 
 Token 用量页面可能在本机显示对话标题、模型名称和工作目录末级名称。这些信息只在
 本地窗口中处理，不会由 CodexBar 上传。
 
 ## SSH 远程读取
 
-用户选择远程数据源时，CodexBar 通过本机 OpenSSH、用户已有的 SSH 配置和密钥连接指定主机。
+用户在任务栏或账本选择远程数据源时，CodexBar 通过本机 OpenSSH、用户已有的 SSH 配置和密钥连接指定主机。
 主机列表从 Codex Desktop 的本地连接设置及 `~/.ssh/config` 读取；列出主机不会发起连接。
 远程 Python 脚本在内存中运行，只读打开远程 Codex SQLite 和 rollout，不安装程序或写入远程文件。
 
@@ -28,13 +32,15 @@ Token 用量页面可能在本机显示对话标题、模型名称和工作目�
 正常关闭面板时删除；如果进程被强制结束或电脑断电，临时目录可能残留。
 这些文件包含会话标题、目录和用量，没有认证凭据或完整对话正文。
 远程 SSH 认证和主机密钥校验遵循用户自己的 OpenSSH 配置，程序不改写 SSH 配置或私钥。
+任务栏来源保存在本机 `config.json` 的 `usage_source` 字段；账本的来源选择独立，修改它不会改变任务栏。
+任务栏首次读取远程来源失败时显示不可用；断线时若已有缓存则保留并标记不完整。
 
 ## 本机写入
 
 CodexBar 自有数据保存在 `%LOCALAPPDATA%\CodexBar`：
 
 - `credentials.dat`：使用 Windows DPAPI 当前用户作用域加密的 OAuth 账号缓存。
-- `config.json`：组件尺寸、颜色、字体和刷新间隔。
+- `config.json`：组件尺寸、颜色、字体、刷新间隔和任务栏来源别名 `usage_source`。
 - `model_prices.json`：用户自定义模型价格。
 - `official_model_prices.json`：官网公开模型和价格的缓存。
 - `error.log` 与 `error.log.1`：经过脱敏并限制大小的诊断日志。
@@ -59,6 +65,10 @@ CodexBar 自有数据保存在 `%LOCALAPPDATA%\CodexBar`：
 
 如果设置系统代理或自定义 CA，网络流量会经过用户选择的代理。用户应只信任自己控制或
 明确信任的代理与证书机构。
+
+用户点击账本的“官方账号用量”时，程序通过系统浏览器打开固定地址
+`https://chatgpt.com/codex/settings/usage`。CodexBar 不向该 URL 附加凭据、日志或统计数据；
+浏览器登录与后续网页请求由浏览器和官方页面处理。
 
 ## 清除和卸载
 

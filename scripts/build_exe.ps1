@@ -1,5 +1,11 @@
+﻿param(
+    [string]$CondaEnvironment = "",
+    [string]$CondaExecutable = "conda"
+)
+
 $ErrorActionPreference = "Stop"
 $env:PYTHONUTF8 = "1"
+$env:PYTHONNOUSERSITE = "1"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = [System.IO.Path]::GetFullPath((Split-Path -Parent $ScriptDir))
@@ -10,6 +16,18 @@ $RootPrefix = $Root.TrimEnd(
     )
 ) + [System.IO.Path]::DirectorySeparatorChar
 Set-Location $Root
+
+function Invoke-BuildPython {
+    param([string[]]$Arguments)
+    if ($CondaEnvironment) {
+        & $CondaExecutable run --no-capture-output -n $CondaEnvironment python @Arguments
+    } else {
+        uv run --frozen --group build python @Arguments
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Build Python command failed (exit $LASTEXITCODE)."
+    }
+}
 
 function Resolve-RepositoryChildPath {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -44,7 +62,7 @@ if ($RunningRelease) {
 
 Remove-Item -LiteralPath $BuildDir -Recurse -Force -ErrorAction SilentlyContinue
 
-uv run --frozen --group build pyinstaller --clean --noconfirm --distpath $StagingDir CodexBar.spec
+Invoke-BuildPython -Arguments @("-m", "PyInstaller", "--clean", "--noconfirm", "--distpath", $StagingDir, "CodexBar.spec")
 if ($LASTEXITCODE -ne 0) {
     throw "Build failed: PyInstaller did not complete successfully."
 }
@@ -84,6 +102,7 @@ $ReleaseDocuments = @(
     @{ Source = "docs\PRIVACY.md"; Destination = "PRIVACY.md" },
     @{ Source = ".github\SECURITY.md"; Destination = "SECURITY.md" },
     @{ Source = "THIRD_PARTY_NOTICES.md"; Destination = "THIRD_PARTY_NOTICES.md" }
+    @{ Source = "docs\QUICK_START.txt"; Destination = "使用说明.txt" }
 )
 foreach ($Document in $ReleaseDocuments) {
     Copy-Item -LiteralPath (Join-Path $Root $Document.Source) `
@@ -91,20 +110,43 @@ foreach ($Document in $ReleaseDocuments) {
 }
 
 $LicenseDir = Join-Path $DistAppDir "licenses"
-uv run --frozen --group build python .\scripts\collect_licenses.py $LicenseDir
+Invoke-BuildPython -Arguments @(".\scripts\collect_licenses.py", $LicenseDir)
 if ($LASTEXITCODE -ne 0) {
     throw "Build failed: third-party license collection failed."
 }
 
-uv run --frozen --group build python .\scripts\audit_release.py $DistAppDir --verify-python-runtime
+Invoke-BuildPython -Arguments @(".\scripts\audit_release.py", $DistAppDir, "--verify-python-runtime")
 if ($LASTEXITCODE -ne 0) {
     throw "Build failed: release privacy audit failed."
+}
+
+$RuntimeReport = Join-Path $BuildDir "packaged-runtime-check.json"
+$CheckProcess = Start-Process -FilePath $ExePath `
+    -ArgumentList @("--self-test", ('"' + $RuntimeReport + '"')) `
+    -WindowStyle Hidden -PassThru
+if (-not $CheckProcess.WaitForExit(60000)) {
+    $CheckProcess.Kill()
+    throw "Build failed: packaged GUI runtime check timed out."
+}
+if ($CheckProcess.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $RuntimeReport)) {
+    throw "Build failed: packaged GUI runtime check failed."
+}
+$RuntimeResult = Get-Content -Raw -LiteralPath $RuntimeReport | ConvertFrom-Json
+if (-not $RuntimeResult.success -or -not $RuntimeResult.frozen) {
+    throw "Build failed: packaged GUI runtime check did not pass."
 }
 
 Remove-Item -LiteralPath $ReleaseZip -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $ReleaseHash -Force -ErrorAction SilentlyContinue
 Compress-Archive -LiteralPath $DistAppDir -DestinationPath $ReleaseZip -CompressionLevel Optimal
-$Hash = (Get-FileHash -LiteralPath $ReleaseZip -Algorithm SHA256).Hash.ToLowerInvariant()
+$HashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
+$HashStream = [System.IO.File]::OpenRead($ReleaseZip)
+try {
+    $Hash = [System.BitConverter]::ToString($HashAlgorithm.ComputeHash($HashStream)).Replace("-", "").ToLowerInvariant()
+} finally {
+    $HashStream.Dispose()
+    $HashAlgorithm.Dispose()
+}
 $HashLine = "$Hash  $(Split-Path -Leaf $ReleaseZip)"
 [System.IO.File]::WriteAllText($ReleaseHash, $HashLine + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
 

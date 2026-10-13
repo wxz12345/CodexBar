@@ -202,9 +202,47 @@ class StaleQuotaTests(unittest.TestCase):
         widget._post_refresh_result = mock.Mock()
         with mock.patch.object(ui.pricing, "refresh_prices"), mock.patch.object(
             ui, "fetch_quota", side_effect=http.client.RemoteDisconnected()
-        ), mock.patch.object(ui.diagnostics, "log_exception"):
+        ), mock.patch.object(ui.diagnostics, "log_exception"), mock.patch.object(
+            ui.token_usage, "collect_today_usage", return_value=None
+        ):
             widget._refresh_worker(1)
-        widget._post_refresh_result.assert_called_once_with(1, None, None, "NET", None)
+        widget._post_refresh_result.assert_called_once_with(1, None, None, "NET", None, mock.ANY)
+        self.assertEqual(widget._post_refresh_result.call_args.args[-1]["id"], "local")
+
+    def test_worker_preserves_local_usage_when_quota_request_fails(self):
+        usage = ui.token_usage.empty_usage()
+        usage["total_tokens"] = 1000000
+        for error, code in ((http.client.RemoteDisconnected(), "NET"),
+                            (ui.AuthRequiredError("missing"), "AUTH")):
+            with self.subTest(code=code):
+                widget = self.widget()
+                widget._post_refresh_result = mock.Mock()
+                with mock.patch.object(ui.pricing, "refresh_prices"), mock.patch.object(
+                    ui, "fetch_quota", side_effect=error
+                ), mock.patch.object(ui.diagnostics, "log_exception"), mock.patch.object(
+                    ui.token_usage, "collect_today_usage", return_value=usage
+                ):
+                    widget._refresh_worker(1)
+                widget._post_refresh_result.assert_called_once_with(1, None, usage, code, None, mock.ANY)
+                self.assertEqual(widget._post_refresh_result.call_args.args[-1]["id"], "local")
+
+    def test_finish_refresh_updates_local_usage_during_auth_failure(self):
+        widget = self.widget()
+        usage = ui.token_usage.empty_usage()
+        usage["total_tokens"] = 1000000
+        widget._finish_refresh(0, None, usage, "AUTH")
+        self.assertEqual(widget.data["usage"]["tokens"], "1.0M")
+        self.assertEqual(widget._status_code, "AUTH")
+
+    def test_full_widget_shows_usage_alongside_auth_error(self):
+        widget = helpers.CompactWidgetTests().widget()
+        widget.f_status = ("Segoe UI", 10)
+        widget._status_code = "AUTH"
+        widget.data["usage"] = {"tokens": "1.0M", "cost": "$1.00"}
+        widget._draw(widget.canvas, 450, 60, False)
+        texts = [call.kwargs["text"] for call in widget.canvas.create_text.call_args_list]
+        self.assertIn("CodexBar AUTH", texts)
+        self.assertIn("1.0M", texts)
 
 
 class NetworkCheckTests(unittest.TestCase):

@@ -16,6 +16,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 window.addEventListener("pywebviewready", async () => {
   bindActions();
+  document.getElementById("accountUsageButton").addEventListener("click", () => window.pywebview.api.open_account_usage());
   await loadSources();
   await loadInitial();
 });

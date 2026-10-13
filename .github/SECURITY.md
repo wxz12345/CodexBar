@@ -2,14 +2,17 @@
 
 ## Supported Versions
 
-Only the latest tagged CodexBar release receives security fixes. The project is currently in
-the `0.x` series, so internal interfaces and the undocumented quota endpoint may change.
+When releases are published in this repository, fixes target the latest maintained version.
+The project is currently in the `0.x` series, so internal interfaces and the undocumented
+quota endpoint may change. Unreleased changes and upstream release notes do not imply that
+this repository has published a corresponding binary.
 
 ## Reporting a Vulnerability
 
-Please use GitHub's private vulnerability reporting form:
-
-<https://github.com/Silver-Ray/CodexBar/security/advisories/new>
+Use this repository's **Security → Report a vulnerability** entry when private vulnerability
+reporting is enabled. If it is unavailable, contact this repository's maintainer through a
+private channel they have published. Maintainers should enable private reporting before
+public release. Do not send reports about this fork to upstream by default.
 
 Do not open a public Issue for a suspected credential leak, authentication bypass, unsafe
 WebView behavior, or release-pipeline compromise. Do not attach real access tokens, refresh

@@ -201,6 +201,9 @@ class RemoteUsageSource:
     def collect_usage_range(self, period, anchor_date=None, use_cache=True):
         return self._collect(token_usage.collect_usage_range, period, anchor_date=anchor_date, use_cache=False)
 
+    def collect_today_usage(self, use_cache=True):
+        return self._collect(token_usage.collect_today_usage, use_cache=False)
+
     def collect_thread_usage_for_day(self, day: dt.date, use_cache=False, progress_callback=None):
         return self._collect(token_usage.collect_thread_usage_for_day, day, use_cache=False, progress_callback=progress_callback)
 

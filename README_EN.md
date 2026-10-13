@@ -2,232 +2,137 @@
 
 English | [简体中文](README.md)
 
-CodexBar is a privacy-conscious Windows taskbar widget for Codex quota and local token usage.
-It can cache multiple ChatGPT OAuth accounts with Windows DPAPI, display available quota
-windows beside the notification area, and build a local token ledger from Codex SQLite and
-rollout JSONL files. The ledger includes daily trends, conversation rankings, token categories,
-and an API-equivalent cost estimate.
+A Windows taskbar widget for Codex quota, tokens, trends, and API-equivalent cost estimates.
+Extract the portable ZIP and double-click `CodexBar.exe`; Python and Conda are not required.
 
-The usage dashboard also supports Codex Desktop SSH sessions. Select a host under **数据来源**
-(Data source) to see its daily conversation usage and weekly/monthly/yearly trends separately
-from local usage. Hosts come from Codex Desktop connections and concrete aliases in `~/.ssh/config`.
-The Windows OpenSSH client and noninteractive SSH key authentication are required. Linux/macOS
-hosts need Python 3.8+ and Codex logs under `CODEX_HOME` or `~/.codex`.
-Only accounting events, titles, models, and paths are returned over SSH; full message bodies,
-tool output, and credentials are excluded. Remote files are read-only, with no installation on the host.
-Reads run in the background with a 30-second timeout and a 60-second cache. Disconnections keep
-the last snapshot and clearly mark stale data. Refresh forces a new read; **返回本机** returns
-to local usage during loading. Dates use the Windows machine's timezone, and taskbar totals remain local.
+The original project is [zhuxianghcl-ctrl/CodexBar](https://github.com/zhuxianghcl-ctrl/CodexBar). These changes build on its fork, [Silver-Ray/CodexBar](https://github.com/Silver-Ray/CodexBar), preserving the original MIT license and attribution. Changes are based on 0.3.1 and do not yet have a separate version tag; see the [changelog](CHANGELOG.md). This is a community project, not affiliated with OpenAI or an official OpenAI product.
 
 <p align="center">
   <img src="docs/images/taskbar-widget.png" alt="CodexBar taskbar widget" width="645">
 </p>
 
-> [!IMPORTANT]
-> CodexBar is a community project and is not affiliated with OpenAI, endorsed by OpenAI, or an
-> official OpenAI product. It does not include telemetry, advertising, or remote log upload.
-> Quota lookup uses an undocumented endpoint, and the local Codex log format is not a stable
-> public API. Upstream changes can temporarily break quota or token reporting. Dollar values
-> are estimates based on public API prices, not subscription bills or actual charges.
+## Download and run
 
-## Quick Start
+Requirements: Windows 10/11 x64 and [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) for the token dashboard.
 
-CodexBar is a portable app. It does not require Python or a traditional installer:
-
-1. Download the latest `CodexBar-Windows-x64.zip` from
-   [GitHub Releases](https://github.com/Silver-Ray/CodexBar/releases).
-2. Extract the complete ZIP.
+1. Download `CodexBar-Windows-x64.zip` from **this repository's Releases page**. If no release exists, a maintainer must first publish it following the [release guide](docs/RELEASING.md).
+2. Extract the entire ZIP.
 3. Open the extracted `CodexBar` folder and run `CodexBar.exe`.
 
-Keep the complete folder together because the dashboard assets and Python runtime sit beside the
-EXE.
+Keep the complete folder, including `_internal` and license files; the EXE cannot run by itself. GitHub's **Source code (zip)** download contains source, not the ready-to-run app.
+Exit any older or source instance first. Single-instance protection silently exits a second process.
 
-The widget uses a free taskbar slot, avoiding application buttons and widgets such as Traffic
-Monitor. When space is tight, it collapses to two rows showing only the 5h and weekly remaining
-quotas. Hover to see all details; move away to dismiss them. Full display returns when space
-becomes available. If even the compact view cannot fit or layout detection is unavailable,
-a CodexBar notification-area icon provides the same hover details, also for top or side taskbars.
-The bar is embedded in the taskbar and stays visible when Start, search, or clock menus open,
-without waiting to reappear after they close.
-Taskbar drawing uses a separate UI thread from settings and menus, so the taskbar host cannot
-block panel focus operations. Restoring the usage window uses an asynchronous request.
-
-Text and layout render at the display's native DPI, including 125%, 150%, and 200% scaling,
-instead of relying on Windows to enlarge a bitmap. The taskbar widget updates when the main
-display or its scale changes, preserving your saved width and font preferences.
-
-> [!NOTE]
-> **Windows SmartScreen may appear on first launch.** CodexBar does not currently use a commercial
-> code-signing certificate, so Windows may show "Unknown publisher", "Windows protected your PC",
-> or "SmartScreen can't be reached right now". This prompt is not a CodexBar startup error and does
-> not by itself mean Windows has identified malware; Windows cannot verify the EXE publisher or
-> retrieve its application reputation.
->
-> Continue only when the ZIP came from this repository's
-> [GitHub Releases](https://github.com/Silver-Ray/CodexBar/releases). For "Windows protected
-> your PC", choose "More info" and then "Run anyway". If SmartScreen cannot be reached, choose
-> "Run". Do not run copies from third-party file hosts, chat attachments, or repackaged downloads.
-
-SHA-256 verification is available later in this README as an optional advanced safety check.
-
-On first use, an existing ChatGPT OAuth login is detected automatically. If the widget shows
-`AUTH`, run `codex login --device-auth`, finish the browser login, and choose Refresh from the
-right-click menu. Click opens Token Usage (or restores its existing window), double-click opens
-Settings, and right-click opens the full menu. The compact view and notification icon use the same actions.
-
-## Run From Source (Developers)
-
-Regular users do not need this section. The ZIP on Releases already contains the packaged EXE and
-its runtime.
-
-Install [uv](https://docs.astral.sh/uv/) and Git on Windows 10 or Windows 11, then clone the
-repository. The included `启动 CodexBar.bat` launcher synchronizes the locked environment and
-starts the widget. You can also run:
-
-```powershell
-uv sync --frozen
-uv run --frozen pythonw .\codexbar.pyw
-```
-
-A session-scoped Windows named mutex keeps the taskbar widget single-instance. Starting it a
-second time exits the new process silently and leaves the existing instance untouched.
-
-## What It Shows
-
-- Available quota windows. A window missing from the server response is shown as `--`.
-- Today's total tokens and API-equivalent estimated cost in the taskbar widget.
-- Daily input, cached-input, output, and reasoning usage in the Token Usage dashboard.
-- Seven-day, current-month, and current-year trends.
-- Per-conversation rankings using locally available renamed titles when possible.
-- Multiple cached OAuth accounts with a taskbar menu for switching the displayed account.
-
-Token usage is aggregated across all locally recorded Codex tasks and is not separated by
-ChatGPT account. Dates use the Windows local time zone. Child-task history copied into another
-rollout is de-duplicated using cumulative token snapshots and handoff boundaries where the
-local event format provides them.
-
-## Screenshots
-
-### Desktop Overview
-
-![CodexBar on the Windows desktop and taskbar](docs/images/desktop-overview.jpg)
-
-### Settings
-
-<p align="center">
-  <img src="docs/images/settings-window.png" alt="CodexBar settings window" width="377">
-</p>
-
-## Quota And Pricing Limitations
-
-Quota requests use `https://chatgpt.com/backend-api/wham/usage`, an undocumented endpoint that
-is not covered by a public stability guarantee. OAuth refreshes use
-`https://auth.openai.com/oauth/token`. TLS certificate and hostname verification remain enabled.
-
-Cost figures use input, cached-input, and output token counts from local events. Reasoning tokens
-are displayed separately but are already part of output pricing and are not charged twice.
-Models and prices update automatically once a day from the public
-[OpenAI Standard API price table](https://developers.openai.com/api/docs/pricing), including
-long-context rates. Failed updates retain the last good cache and retry after an hour; a bundled
-snapshot supports first-run offline use. The dashboard shows the price date and offline status.
-The scrollable price editor includes newly published models, and manual overrides take priority.
-If no discounted cached-input rate is published, the normal input rate is used. Estimates do not represent a
-ChatGPT Plus, Pro, Team, or Enterprise bill.
-
-## Local Data And Privacy
-
-CodexBar reads these existing files without modifying them:
-
-- `~/.codex/auth.json`, to detect a complete ChatGPT OAuth login.
-- Codex SQLite databases and rollout JSONL files, to calculate local token usage.
-
-CodexBar writes only its own application data under `%LOCALAPPDATA%\CodexBar`:
-
-- `credentials.dat`: OAuth account cache encrypted with current-user Windows DPAPI.
-- `config.json`: widget and refresh settings.
-- `model_prices.json`: optional user price overrides.
-- `official_model_prices.json`: the latest public model/price cache.
-- `error.log` and `error.log.1`: size-limited, sanitized diagnostics.
-
-Conversation titles, rollouts, token reports, price overrides, and diagnostic logs are not sent
-by CodexBar. The quota request necessarily sends the selected OAuth credential and account ID to
-the OpenAI authentication or ChatGPT host. See [docs/PRIVACY.md](docs/PRIVACY.md) for the complete boundary.
-Pricing sync reads only the public official documentation and sends no OAuth credentials or local usage data.
-
-An attacker already running code as the same signed-in Windows user may be able to use DPAPI and
-read that user's files. DPAPI protects data at rest from other users; it does not protect a
-compromised Windows session.
-
-<details>
-<summary>Optional: verify the downloaded SHA-256</summary>
-
-Download `CodexBar-Windows-x64.zip.sha256` for the same release, then run these commands beside
-the ZIP:
+The package is unsigned, so Windows SmartScreen may show an unknown publisher warning. Download the matching `.zip.sha256` and compare the SHA-256:
 
 ```powershell
 (Get-FileHash .\CodexBar-Windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
 Get-Content .\CodexBar-Windows-x64.zip.sha256
 ```
 
-The two 64-character hexadecimal values should match exactly. This step is optional for normal
-use.
+## Features and controls
 
-</details>
+- **Account quota:** server quota windows, remaining percentages, reset times, and multiple cached ChatGPT OAuth accounts.
+- **Taskbar usage:** today's tokens and estimated cost for the selected local or SSH source; a compact view or tray icon when space is limited.
+- **Dashboard:** daily input, cached input, output, reasoning, conversation rankings, and weekly/monthly/yearly trends.
+- **SSH sources:** select a remote device in the taskbar or dashboard and view its logs separately.
+- **Customization:** width, font, colors, refresh interval, model prices, and high DPI support.
 
-## Diagnostics
+Click for the dashboard and double-click for settings. In the taskbar or tray icon's right-click menu, use **Usage source** to select this PC or a discovered SSH host; the taskbar remembers its selection. The dashboard has its own independent source selector and does not change the taskbar source.
+Existing ChatGPT OAuth logins are detected automatically; if `AUTH` appears, complete Codex login and refresh.
+Usage collection remains independent of quota authentication and network requests. If the selected remote source cannot be read on its first attempt, the taskbar shows it as unavailable instead of substituting local data or zero.
 
-Connection failures show `NET`, certificate failures show `TLS`, and HTTP failures show
-their status. Read-only quota GETs retry connection failures and selected temporary HTTP
-errors up to three times, with 1- and 2-second delays. OAuth refresh POSTs are not replayed.
-After a successful query, refresh failures preserve the last quota with `*` percentages
-and an error/last-update time in the full view, retrying every minute. Successful refreshes
-clear that warning. Account changes and authentication failures discard the old quota.
+## Scope and accuracy
 
-To check the actual packaged network runtime without closing the widget, run in PowerShell:
+**Account quota and log-based tokens are separate data. Switching the quota account does not filter, attribute, or merge logs.**
+
+| Data | Current coverage |
+| --- | --- |
+| Account quota | Server quota for the selected OAuth account |
+| Taskbar tokens | Readable Codex logs from the selected local or SSH source; one source at a time, across accounts |
+| Dashboard tokens | Readable logs on the selected local or SSH device, viewed separately |
+| Account-wide device and cloud tokens | Not implemented; other devices and personal Plus/Pro cloud tasks are not automatically aggregated |
+
+Discovery respects `CODEX_HOME`, defaulting to `~/.codex`. It combines SQLite indexes with `sessions` and `archived_sessions` scans, including unindexed logs, relative paths, moved archived logs, and duplicate file discovery.
+
+- Cumulative `token_count` snapshots become increments; identifiable replay boundaries help handle copied history.
+- Cached input belongs to input and reasoning belongs to output. Neither is added twice.
+- Dates use the Windows machine's local timezone, including for SSH sources.
+- Detected missing or unreadable records mark results incomplete. This cannot detect every unrecorded task.
+- Deleted, inaccessible, or unrecorded logs and unselected devices or cloud tasks cannot be reconstructed or inferred.
+
+Dollar values are public API-price estimates, **not subscription bills or actual charges**. Prices support daily public-document updates, offline caching, and manual overrides. Unknown models still contribute tokens, but their cost may be unavailable.
+
+The **官方账号用量** (Official account usage) button opens the [official Codex usage page](https://chatgpt.com/codex/settings/usage) in your browser.
+The workspace [Analytics API](https://learn.chatgpt.com/docs/enterprise/analytics-api) requires workspace enablement and appropriate admin permissions; this project does not integrate it.
+Quota lookup uses an undocumented endpoint, and log formats may change. Log totals carry no billing-grade completeness guarantee.
+
+## SSH requirements
+
+Windows OpenSSH, working noninteractive authentication, and remote Python 3.8+ with readable Codex logs are required.
+Hosts come from Codex Desktop connections and `~/.ssh/config` aliases. Authentication and host-key verification follow your OpenSSH configuration.
+
+The probe reads remote data without installing anything. It returns accounting events and metadata, excluding message bodies, tool output, and credentials.
+The taskbar and dashboard use the same read-only probe, cache, and timeout rules. Remote taskbar token counts are prefixed with **Remote**; the source menu and tray tooltip show the selected source and its status or errors. Disconnections retain a cached snapshot and mark it incomplete; a failed first read shows as unavailable. The taskbar selection is saved in the local `usage_source` config setting, independently of the dashboard selector.
+
+## Privacy and local data
+
+CodexBar does not include telemetry, advertising, or remote log upload. Codex login files, databases, and rollouts are read-only.
+OAuth caches use Windows DPAPI; settings, caches, and sanitized logs live under `%LOCALAPPDATA%\CodexBar`.
+
+Quota and login refresh send necessary authentication information to ChatGPT/OpenAI. Pricing sync reads public documentation. CodexBar does not upload logs, titles, or token reports. See [privacy](docs/PRIVACY.md) and [security](.github/SECURITY.md).
+
+Do not attach `auth.json`, `credentials.dat`, raw rollouts, or unchecked logs to Issues. Inspect sanitized exports before sharing.
+Uninstall by exiting and deleting the app folder. Optionally delete `%LOCALAPPDATA%\CodexBar` to clear cached accounts and settings; preserve Codex's own files.
+
+## Run from source
+
+Use Windows, Python 3.13+, and [uv](https://docs.astral.sh/uv/). From the project root:
 
 ```powershell
-.\CodexBar.exe --check-network "$env:TEMP\CodexBar-network.json"
-Get-Content "$env:TEMP\CodexBar-network.json"
+uv sync --frozen
+uv run --frozen pythonw .\codexbar.pyw
 ```
 
-This queries quota using the current login and its normal credential-refresh flow. The
-report includes runtime versions, configured proxy protocols, result status and duration;
-it excludes credentials, accounts, proxy URLs and API response bodies.
+The included `启动 CodexBar.bat` also synchronizes the locked environment and starts the app.
+With Conda, explicitly select a prepared environment for every command. Local validation used `codexbar-build`; see [contributing](.github/CONTRIBUTING.md).
 
-`ERR` indicates an unexpected refresh error, often a temporary proxy, network, upstream HTTP,
-or local-file condition. The taskbar menu can open the local error log or export a sanitized
-diagnostic report. Sanitization is defense in depth, so inspect every report before sharing it.
-Never attach real tokens, account IDs, `auth.json`, `credentials.dat`, raw rollouts, or unchecked
-logs to a public Issue.
+## Build and validation
 
-## Uninstall
-
-1. Exit CodexBar and delete the extracted application directory or source checkout.
-2. Delete `%LOCALAPPDATA%\CodexBar` to remove credentials, settings, prices, and diagnostics.
-3. Delete any shortcut you created.
-4. If rollback is no longer needed, optionally remove legacy `.codexbar_cfg.json`,
-   `.quota_widget_cfg.json`, and `%LOCALAPPDATA%\CodexQuota` data.
-
-CodexBar never deletes `~/.codex/auth.json`, Codex databases, or rollout conversation history.
-
-## Development
+The default build uses locked dependencies:
 
 ```powershell
-uv lock --check
 uv sync --frozen --group build
-uv run --frozen python -m unittest -q .\test_codexbar.py
-uv run --frozen python -m compileall -q .\codexbar .\codexbar.pyw .\codexbar_dashboard.pyw .\test_codexbar.py
+uv run --frozen python -m unittest discover -q
+.\scripts\build_exe.ps1
 ```
 
-Tests use temporary auth, configuration, vault, database, and HTTP fixtures. They do not access
-your real Codex login. Contributions should add a failing behavior test first and use DCO
-sign-off with `git commit -s`.
+It generates `dist/CodexBar-Windows-x64.zip` and its `.sha256`, collects licenses, audits privacy, and checks the actual EXE's Tk/WebView2 runtime with synthetic data. Independently verify the ZIP:
 
-## Project Policies
+```powershell
+.\scripts\verify_portable.ps1
+```
 
-- License: [MIT LICENSE](LICENSE)
-- Privacy: [docs/PRIVACY.md](docs/PRIVACY.md)
-- Security: [.github/SECURITY.md](.github/SECURITY.md)
-- Contributing: [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md)
-- Third-party licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-- Code of conduct: [.github/CODE_OF_CONDUCT.md](.github/CODE_OF_CONDUCT.md)
+Local validation on 2026-10-11 passed 288 tests, source and packaged GUI self-tests, and an extracted-ZIP check in a path containing Chinese characters and spaces with Python/Conda search paths removed from the child process.
+**These synthetic checks do not validate live SSH or real account quota queries.** See the [validation record](verification/README.md).
+
+## Screenshots
+
+Inherited upstream screenshots illustrate the basic UI. See the app for the current scope notice and new account-usage button.
+
+![Desktop and taskbar](docs/images/desktop-overview.jpg)
+
+<p align="center">
+  <img src="docs/images/settings-window.png" alt="Settings" width="377">
+</p>
+
+## Documentation and license
+
+- [Changelog](CHANGELOG.md)
+- [GitHub upload guide](docs/GITHUB_UPLOAD.md)
+- [Windows release guide](docs/RELEASING.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Contributing](.github/CONTRIBUTING.md)
+- [Code of conduct](.github/CODE_OF_CONDUCT.md)
+- [MIT License](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md)
+
+Thanks to the original author [zhuxianghcl-ctrl](https://github.com/zhuxianghcl-ctrl/CodexBar), the fork [Silver-Ray/CodexBar](https://github.com/Silver-Ray/CodexBar), and contributors. Preserve the original copyright notices and bundled third-party licenses when redistributing source or binaries.

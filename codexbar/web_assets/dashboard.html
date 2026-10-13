@@ -32,6 +32,7 @@
         <div id="pricingStatus" class="eyebrow">API 等价估算 · 官网价格每日更新</div>
         <h1>Token 用量账本</h1>
         <div id="sourceStatus" class="muted" aria-live="polite">数据来源：本机</div>
+        <div class="muted">Token 仅覆盖所选设备可读取的日志，不按账号归属；其他设备与云端任务未纳入。</div>
       </div>
       <div class="actions">
         <label class="source-picker" for="sourceSelect">数据来源
@@ -39,6 +40,7 @@
             <option value="local">本机</option>
           </select>
         </label>
+        <button id="accountUsageButton" type="button">官方账号用量</button>
         <button id="todayButton" type="button">今天</button>
         <button id="refreshButton" type="button">刷新</button>
       </div>

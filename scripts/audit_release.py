@@ -64,7 +64,8 @@ def _unchanged_python_binary(
     if (len(relative.parts) != 2 or relative.parts[0] != "_internal"
             or path.suffix.casefold() not in {".dll", ".pyd"}):
         return False
-    for candidate in (runtime_root / path.name, runtime_root / "DLLs" / path.name):
+    for candidate in (runtime_root / path.name, runtime_root / "DLLs" / path.name,
+                      runtime_root / "Library" / "bin" / path.name):
         try:
             if (candidate.resolve().is_relative_to(runtime_root)
                     and candidate.is_file() and candidate.read_bytes() == content):

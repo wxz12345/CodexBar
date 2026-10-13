@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import TypedDict
 
 
@@ -18,10 +19,11 @@ class AppConfig(TypedDict):
     color_warn: str
     color_low: str
     widget_background: str
+    usage_source: str
 
 
 HOME = os.path.expanduser("~")
-AUTH_PATH = os.path.join(HOME, ".codex", "auth.json")
+AUTH_PATH = os.path.join(os.path.expanduser(os.environ.get("CODEX_HOME") or os.path.join(HOME, ".codex")), "auth.json")
 VAULT_DIR = os.path.join(os.environ.get("LOCALAPPDATA", HOME), "CodexBar")
 LEGACY_VAULT_DIR = os.path.join(os.environ.get("LOCALAPPDATA", HOME), "CodexQuota")
 CONFIG_PATH = os.path.join(VAULT_DIR, "config.json")
@@ -68,7 +70,10 @@ DEFAULTS: AppConfig = {
     "color_warn": "#ffb02e",
     "color_low": "#ff5a4d",
     "widget_background": CARD,
+    "usage_source": "local",
 }
+
+_SSH_ALIAS = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,253}\Z")
 
 W_MIN, W_MAX = 250, 440
 H_MIN, H_MAX = 36, 48
@@ -103,6 +108,16 @@ def valid_widget_background(value: object) -> str:
     if color.lower() == MAGIC.lower():
         return DEFAULTS["widget_background"]
     return color
+
+
+def valid_usage_source(value: object) -> str:
+    """Validate a persisted local or OpenSSH alias source identifier."""
+
+    if isinstance(value, str) and value == "local":
+        return value
+    if isinstance(value, str) and value.startswith("ssh:") and _SSH_ALIAS.fullmatch(value[4:]):
+        return value
+    return DEFAULTS["usage_source"]
 
 
 def _bounded_int(value: object, fallback: int, lower: int, upper: int) -> int:
@@ -141,6 +156,7 @@ def _validated_config(raw: dict[str, object]) -> AppConfig:
         color_warn=valid_hex(merged.get("color_warn"), DEFAULTS["color_warn"]),
         color_low=valid_hex(merged.get("color_low"), DEFAULTS["color_low"]),
         widget_background=valid_widget_background(merged.get("widget_background")),
+        usage_source=valid_usage_source(merged.get("usage_source")),
     )
 
 

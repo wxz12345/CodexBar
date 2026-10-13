@@ -666,6 +666,27 @@ h1 {
   font: 12px "Cascadia Mono", Consolas, monospace;
 }
 
+@media (max-width: 1500px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+
+  .actions {
+    flex-wrap: wrap;
+  }
+
+  .layout {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+
+  .conversation-panel {
+    grid-column: 1 / -1;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+
 @media (max-height: 1000px) {
   body {
     padding: 14px 0;

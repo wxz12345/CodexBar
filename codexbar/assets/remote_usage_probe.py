@@ -126,8 +126,47 @@ def main():
         finally:
             if db is not None:
                 db.close()
-    if not found_database:
-        raise RuntimeError("No readable remote Codex thread database")
+    # CLI sessions and archived sessions can exist without an index database.
+    for directory in (home / "sessions", home / "archived_sessions"):
+        try:
+            for candidate in sorted(directory.rglob("rollout-*.jsonl")):
+                path = candidate.resolve()
+                if path in seen or not path.is_file():
+                    continue
+                try:
+                    path.relative_to(home)
+                except ValueError:
+                    warnings.append("Skipped rollout outside remote CODEX_HOME")
+                    continue
+                seen.add(path)
+                record = {"id": path.stem, "title": "", "model": "", "cwd": "", "updated_at_ms": 0}
+                try:
+                    with path.open(encoding="utf-8", errors="replace") as stream:
+                        value = json.loads(stream.readline(1024 * 1024))
+                    if isinstance(value, dict) and value.get("type") == "session_meta":
+                        metadata = value.get("payload")
+                        if isinstance(metadata, dict):
+                            record.update({key: metadata[key] for key in ("id", "title", "model", "cwd") if key in metadata})
+                except (ValueError, TypeError):
+                    pass
+                except OSError as error:
+                    warnings.append(path.name + ": " + type(error).__name__)
+                    continue
+                # Recover a moved indexed record; never export it twice.
+                for indexed in records:
+                    old_path = indexed["_path"]
+                    if not old_path.is_file() and old_path.name == path.name and indexed.get("id") == record.get("id"):
+                        indexed["_path"] = path
+                        break
+                else:
+                    record["_path"] = path
+                    records.append(record)
+                    if len(records) > MAX_THREADS:
+                        raise RuntimeError("Remote thread limit exceeded")
+        except OSError as error:
+            warnings.append(directory.name + ": " + type(error).__name__)
+    if not found_database and not records:
+        raise RuntimeError("No readable remote Codex sessions")
     result = {"schema": 1, "threads": [], "warnings": warnings}
     byte_count = 0
     for record in records:

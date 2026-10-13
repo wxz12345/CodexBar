@@ -7,7 +7,7 @@
 
 CodexBar 由两个本地窗口组成：
 
-- Tk 任务栏小组件：显示额度、今日 token 和估算花销，提供设置与账号菜单。
+- Tk 任务栏小组件：显示所选 OAuth 账号额度及当前来源的今日 token 和估算花销，提供设置、账号和用量来源菜单。
 - pywebview 用量页面：使用 HTML、CSS 和 JavaScript 展示日期、对话排行和趋势图。
 
 ```mermaid
@@ -63,7 +63,7 @@ quota_api.py → ChatGPT usage 接口
 ui.py → 周额度或错误状态
 ```
 
-`credentials.py` 只读取 `~/.codex/auth.json`。完整 OAuth 登录会被复制进当前 Windows
+`credentials.py` 只读取 `CODEX_HOME` 下的 `auth.json`，未设置时使用 `~/.codex/auth.json`。完整 OAuth 登录会被复制进当前 Windows
 用户可解密的 DPAPI vault；API key 登录、退出或临时损坏不会自动清空已保存账号。
 刷新 access token 时只更新 CodexBar 自己的 vault，不修改 Codex 文件。
 
@@ -72,8 +72,16 @@ ui.py → 周额度或错误状态
 
 ## Token 数据流
 
-`token_usage.py` 以只读方式打开 Codex SQLite，取得唯一的 rollout 路径，然后解析 JSONL
-中的 `token_count` 事件。统计按 Windows 本地日期聚合，不写入 Codex 数据库或 rollout。
+`token_usage.py` 从 `CODEX_HOME`（默认 `~/.codex`）只读打开 Codex SQLite，包括
+`state_*.sqlite`，合并数据库索引与 `sessions` / `archived_sessions` 下的 rollout 扫描。
+相对路径按 Codex 根目录解析，归档移动后的日志可通过扫描恢复，实际文件路径用于去重；
+发现索引中的记录无法读取时标记不完整。
+
+JSONL 中的 `token_count` 累计快照转换为增量，并按可识别的回放边界处理重复历史。
+统计按 Windows 本地日期聚合，不写入 Codex 数据库或 rollout。用量不按额度账号归属；
+任务栏按 `config.json` 的 `usage_source` 显示本机或所选 SSH 主机的日志，账本的来源选择独立，
+不会改变任务栏来源。两者每次只显示一个来源，不自动汇总全账号、其他设备或云端任务。
+额度查询失败不会改变用量来源；缺失或不可访问的日志不能推算恢复。任务栏首次读取远程来源失败时显示不可用，不以本机数据或零值代替；已有远程缓存遇到断线时保留旧数据并标记不完整。
 
 计价规则：
 
@@ -90,8 +98,10 @@ WebView 的数据源参数在每次日期、周期和后台加载请求中显式
 OpenSSH 子进程，将打包的 `assets/remote_usage_probe.py` 通过 stdin 交给远程 Python 3.8+。
 探针只读远程数据库与日志，并过滤为记账事件和会话元数据；消息正文、工具输出和凭据不返回。
 响应限制为 32 MiB，客户端为每个来源生成独立临时数据库及精简日志，再复用 `token_usage.py`。
-来源各自串行刷新，缓存 60 秒；断线保留旧快照并将结果标为不完整。前端用请求序号丢弃旧响应，
-后台任务按来源合并，远程读取不会阻塞本机任务，加载层支持立即返回本机。
+任务栏和账本使用相同的只读探针、超时和按来源缓存规则；来源各自串行刷新，缓存 60 秒。
+断线时保留已有快照并将结果标为不完整，任务栏首次读取失败则报告不可用，不回退到本机或零值。
+远程读取在后台执行，不阻塞本机任务；账本使用自己的来源选择，任务栏选择单独保存在本机配置中。
+前端用请求序号丢弃旧响应，后台任务按来源合并。
 
 `pricing.py` 在额度刷新及 WebView 初始加载的后台线程中每日读取一次官网公开 Markdown
 价格表，只解析 Standard 的按百万文本 token 计价列，排除缓存写入、音频、图片、训练及
@@ -103,7 +113,9 @@ Batch/Flex/Fast 表。解析成功后通过临时文件和原子替换保存缓�
 
 ## WebView 边界
 
-`web_dashboard.py` 只向页面暴露统计、刷新、复制摘要和价格设置等有限 API。页面资源来自
+`web_dashboard.py` 只向页面暴露统计、刷新、复制摘要和价格设置等有限 API。
+`open_account_usage()` 通过系统浏览器打开固定的官方用量 URL，不接受任意导航地址或传递凭据。
+页面资源来自
 `codexbar/web_assets`，WebView 使用私有模式；导航离开内置本地页面时窗口会被关闭。
 
 页面显示的对话标题、模型、工作目录末级名称和 token 汇总只在本机处理，不会由 CodexBar
@@ -114,7 +126,7 @@ Batch/Flex/Fast 表。解析成功后通过临时文件和原子替换保存缓�
 CodexBar 自有文件位于 `%LOCALAPPDATA%\CodexBar`：
 
 - `credentials.dat`：DPAPI 加密账号 vault。
-- `config.json`：显示与刷新设置。
+- `config.json`：显示与刷新设置，以及任务栏来源 `usage_source`（`local` 或 `ssh:<主机别名>`）。
 - `model_prices.json`：可选价格覆盖。
 - `official_model_prices.json`：公开价格表的成功同步缓存。
 - `error.log`、`error.log.1`：限制大小且经过脱敏的诊断日志。
@@ -134,10 +146,14 @@ CodexBar 自有文件位于 `%LOCALAPPDATA%\CodexBar`：
 `CodexBar.spec` 描述 PyInstaller one-folder 构建，`scripts/build_exe.ps1` 负责：
 
 1. 清理旧构建目录。
-2. 按 `uv.lock` 运行固定版本 PyInstaller。
-3. 收集隐私、安全和第三方许可证文件。
+2. 默认按 `uv.lock` 运行固定版本 PyInstaller，或显式使用 `-CondaEnvironment` 指定的环境。
+3. 收集使用说明、隐私、安全和第三方许可证文件。
 4. 执行发布隐私审计。
-5. 生成 ZIP 和 SHA-256 文件。
+5. 调用实际 EXE 的 `--self-test`，验证 Tk、WebView2 和页面桥接；仅使用临时合成日志，不查询真实账号额度。
+6. 生成 ZIP 和 SHA-256 文件。
+
+`scripts/verify_portable.ps1` 独立解压 ZIP 到含中文及空格的目录，在子进程中移除
+Python/Conda 搜索路径后运行同一自检。检查范围与复现命令见 [验证记录](../verification/README.md)。
 
 构建审计通过 `--verify-python-runtime` 将 `_internal` 下的 Python DLL/PYD 与构建解释器
 原始文件逐字节核对；仅完全一致的原生运行库可保留上游编译机路径。修改过的二进制、

@@ -30,6 +30,20 @@ def count_event(timestamp, input_tokens, output_tokens):
 
 
 class RemoteUsageTests(unittest.TestCase):
+    def test_probe_reads_unindexed_archived_sessions_without_a_database(self):
+        self.db_path.unlink()
+        path = self.codex_home / "archived_sessions" / "2026" / "rollout-unindexed.jsonl"
+        path.parent.mkdir(parents=True)
+        path.write_text("".join(json.dumps(event) + "\n" for event in self.events), encoding="utf-8")
+        snapshot = self.probe()
+        self.assertEqual(len(snapshot["threads"]), 1)
+        self.assertNotIn("PRIVATE_MESSAGE_BODY", json.dumps(snapshot))
+        self.assertNotIn("PRIVATE_INSTRUCTIONS", json.dumps(snapshot))
+        destination = self.home / "cache"
+        remote_usage.materialize_snapshot(snapshot, destination)
+        result = token_usage.collect_usage_days(2, destination, dt.date(2026, 10, 9), False)
+        self.assertEqual(result["total_tokens"], 180)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

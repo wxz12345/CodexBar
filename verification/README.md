@@ -1,0 +1,56 @@
+# 验证记录
+
+记录日期：2026-10-11。验证对象为基于 0.3.1 的未发布修改，不代表所有机器或未来构建均已通过。
+
+## 窗口尺寸验证 — 2026-10-13
+
+- 默认窗口调整为 1290 × 735，最小尺寸为 1200 × 540。
+- 账本相关 14 项测试通过；未在本次尺寸修改后重跑完整 288 项测试。
+- 源码、重新打包的 EXE 和独立解压 ZIP 的 WebView2 自检通过，缩小后页面布局无横向溢出。
+- 自检仍使用合成日志，不读取真实账号或验证实际 SSH 连接。
+
+## 任务栏来源切换验证 — 2026-10-13
+
+- 加入来源切换后，完整测试 307 项通过，包括来源配置、本机/远程统计、缓存断线、首次读取失败、旧请求丢弃、保存失败回滚、外观预览隔离与账号额度失败。
+- 真实 Tk 菜单自检可点击服务器和本机选项，并确认来源选择保存；所有配置写入隔离临时目录。
+- 在 250 像素任务栏宽度下检查远程提示与用量数字，未覆盖额度重置时间。
+- SSH 数据在测试中模拟；此记录不代表真实服务器连接或账号额度查询已验证。
+
+## 基础功能验证 — 2026-10-11
+
+- `codexbar-build` Conda 环境：完整测试 288 项通过。
+- 合成日志覆盖未入库会话、归档会话、CODEX_HOME、新版数据库、相对路径、失效索引路径与重复扫描。
+- SSH 探针的本地执行、消息正文排除及统计一致性检查通过；未进行真实 SSH 连接验证。
+- 额度认证或网络失败时，本机用量继续收集并绘制的检查通过。
+- 源码和实际 EXE 的 Tk/WebView2 自检通过，页面桥接返回合成会话的 165 tokens。
+- ZIP 在含中文和空格的目录中解压，移除子进程 Python/Conda 搜索路径后自检通过。
+- 发布包完成许可证收集和隐私审计；原始运行库路径豁免需逐字节一致，凭据与修改过的 DLL 仍会被拒绝。
+
+## 复现检查
+
+在项目根目录、已准备好的环境中执行：
+
+```powershell
+conda run --no-capture-output -n codexbar-build python -m unittest discover -q
+conda run --no-capture-output -n codexbar-build python .\codexbar.pyw --self-test .\source-runtime-check.json
+.\scripts\build_exe.ps1 -CondaEnvironment codexbar-build
+.\scripts\verify_portable.ps1
+```
+
+也可按 [贡献指南](../.github/CONTRIBUTING.md) 使用 uv 锁定环境。构建会替换旧产物，先退出从发布目录运行的应用。
+
+生成的报告分别为：
+
+- `source-runtime-check.json`：源码窗口与账本加载。
+- `build/packaged-runtime-check.json`：打包 EXE。
+- `build/portable-runtime-check.json`：从 ZIP 解压后的 EXE。
+- `dist/CodexBar-Windows-x64.zip.sha256`：当前发布包校验值。
+
+本地留存的报告及本目录中的 JSON 快照由 .gitignore 排除，避免把机器相关的运行结果当作源码。它们不作为 GitHub 上必然存在的附件；维护者可在检查后另行分享。实际结果应检查 JSON 的 `success`，打包检查还应有 `frozen: true`。
+
+## 范围与限制
+
+统计来自所选设备的可读取日志，不按 OAuth 账号归属；个人 Plus/Pro 全账号跨设备与云端 token 明细尚未接入。账本提供官方账号用量入口，不用额度百分比推算 token。金额是 API 等价估算，不是实际订阅扣费。
+
+自检使用隔离临时数据，不读取真实 OAuth 凭据，也不查询额度服务。源码、EXE 与 ZIP 运行检查不能替代真实账号、真实 SSH、任务栏布局或不同目标系统上的交互验证。
+程序采用单实例保护，测试常规启动前应先退出旧版；已有实例会使新实例静默退出。

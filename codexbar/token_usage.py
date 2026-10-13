@@ -354,7 +354,7 @@ def collect_today_usage(
 ) -> TokenUsageData:
     """Collect local-date token usage from Codex rollout history."""
 
-    home = Path(codex_home or config.HOME) / ".codex" if codex_home is None else Path(codex_home)
+    home = _codex_home(codex_home)
     target_day = today or dt.date.today()
     cache_key = (str(home), target_day.isoformat())
     global _CACHE
@@ -391,7 +391,7 @@ def collect_usage_range(
     if period not in ("week", "month", "year"):
         raise ValueError("period must be week, month, or year")
 
-    home = Path(codex_home or config.HOME) / ".codex" if codex_home is None else Path(codex_home)
+    home = _codex_home(codex_home)
     target_day = anchor_date or dt.date.today()
     cache_key = (str(home), period, target_day.isoformat())
     global _RANGE_CACHE
@@ -423,7 +423,7 @@ def collect_usage_days(
     """Collect the latest ``days`` local dates as daily dashboard buckets."""
 
     day_count = max(1, min(int(days), 366))
-    home = Path(codex_home or config.HOME) / ".codex" if codex_home is None else Path(codex_home)
+    home = _codex_home(codex_home)
     target_day = anchor_date or dt.date.today()
     start_date = target_day - dt.timedelta(days=day_count - 1)
     end_date = target_day
@@ -466,7 +466,7 @@ def collect_thread_usage_for_day(
     """
 
     del use_cache  # Reserved for a future dedicated cache without changing API.
-    home = Path(codex_home or config.HOME) / ".codex" if codex_home is None else Path(codex_home)
+    home = _codex_home(codex_home)
     prices = load_model_prices()
     rows: list[ThreadUsageData] = []
     seen_rollouts: set[Path] = set()
@@ -474,15 +474,7 @@ def collect_thread_usage_for_day(
     records: list[tuple[dict[str, str | int | None], Path]] = []
     scan_warnings: list[str] = []
 
-    for db_path in _candidate_db_paths(home):
-        for record in _thread_rollouts(db_path, scan_warnings):
-            rollout = _normal_path(record["rollout_path"])
-            if not rollout or rollout in seen_rollouts:
-                continue
-            seen_rollouts.add(rollout)
-            if not rollout.is_file():
-                continue
-            records.append((record, rollout))
+    records = _rollout_records(home, scan_warnings)
 
     _report_rollout_progress(progress_callback, 0, len(records))
     for index, (record, rollout) in enumerate(records, start=1):
@@ -501,6 +493,7 @@ def collect_thread_usage_for_day(
         if thread_events:
             totals["events"] = thread_events
             totals["threads"] = 1
+            _set_scan_warnings(totals, scan_warnings)
             title = _conversation_title(record, display_titles)
             rows.append(
                 ThreadUsageData(
@@ -549,15 +542,7 @@ def _collect_today_usage_uncached(
     scan_warnings: list[str] = []
     records: list[tuple[dict[str, str | int | None], Path]] = []
 
-    for db_path in _candidate_db_paths(codex_home):
-        for record in _thread_rollouts(db_path, scan_warnings):
-            rollout = _normal_path(record["rollout_path"])
-            if not rollout or rollout in seen_rollouts:
-                continue
-            seen_rollouts.add(rollout)
-            if not rollout.is_file():
-                continue
-            records.append((record, rollout))
+    records = _rollout_records(codex_home, scan_warnings)
 
     for record, rollout in records:
         thread_events = 0
@@ -595,15 +580,7 @@ def _collect_usage_range_uncached(
     scan_warnings: list[str] = []
     records: list[tuple[dict[str, str | int | None], Path]] = []
 
-    for db_path in _candidate_db_paths(codex_home):
-        for record in _thread_rollouts(db_path, scan_warnings):
-            rollout = _normal_path(record["rollout_path"])
-            if not rollout or rollout in seen_rollouts:
-                continue
-            seen_rollouts.add(rollout)
-            if not rollout.is_file():
-                continue
-            records.append((record, rollout))
+    records = _rollout_records(codex_home, scan_warnings)
 
     for record, rollout in records:
         for event in _read_rollout_events_between(
@@ -741,6 +718,7 @@ def _append_scan_warning(
 
 def _candidate_db_paths(codex_home: Path) -> list[Path]:
     paths = [codex_home / "state_5.sqlite", codex_home / "sqlite" / "state_5.sqlite"]
+    paths.extend(sorted(codex_home.glob("state_*.sqlite"), reverse=True))
     sqlite_dir = codex_home / "sqlite"
     if sqlite_dir.is_dir():
         paths.extend(sorted(sqlite_dir.glob("*.db")))
@@ -784,7 +762,7 @@ def _thread_rollouts(
             f"{id_expr}, rollout_path, {model_expr}, {updated_expr}, "
             f"{title_expr}, {first_user_expr}, {preview_expr}, {cwd_expr} "
             "FROM threads WHERE rollout_path IS NOT NULL AND rollout_path != '' "
-            f"ORDER BY {updated_expr} DESC"
+            + ("ORDER BY updated_at_ms DESC" if "updated_at_ms" in columns else "")
         )
         return [
             {
@@ -804,6 +782,62 @@ def _thread_rollouts(
         return []
     finally:
         db.close()
+
+
+def _codex_home(value: str | os.PathLike[str] | None = None) -> Path:
+    return Path(value or os.environ.get("CODEX_HOME") or Path(config.HOME) / ".codex").expanduser().resolve()
+
+
+def _rollout_records(home: Path, warnings: list[str]) -> list[tuple[dict, Path]]:
+    """Merge the read-only index with unindexed and archived session files."""
+    records: dict[Path, dict] = {}
+    missing: dict[Path, dict] = {}
+    for database in _candidate_db_paths(home):
+        for record in _thread_rollouts(database, warnings):
+            path = _normal_path(record["rollout_path"])
+            if path is None:
+                continue
+            path = (path if path.is_absolute() else home / path).expanduser().resolve()
+            if path.is_file():
+                records.setdefault(path, record)
+            else:
+                missing.setdefault(path, record)
+
+    for directory in (home / "sessions", home / "archived_sessions"):
+        if not directory.is_dir():
+            continue
+        try:
+            for candidate in sorted(directory.rglob("rollout-*.jsonl")):
+                path = candidate.resolve()
+                if path in records or not path.is_file():
+                    continue
+                record = {"id": path.stem, "rollout_path": str(path), "model": "",
+                          "cwd": "", "title": "", "updated_at_ms": 0}
+                try:
+                    with path.open(encoding="utf-8", errors="replace") as stream:
+                        value = json.loads(stream.readline(1024 * 1024))
+                    if isinstance(value, dict) and value.get("type") == "session_meta":
+                        metadata = value.get("payload") or {}
+                        if isinstance(metadata, dict):
+                            record.update({key: metadata[key] for key in ("id", "cwd", "model", "title") if key in metadata})
+                except (ValueError, TypeError):
+                    pass
+                except OSError as error:
+                    _append_scan_warning(warnings, path, error)
+                    continue
+                # An archived/moved file can retain the Desktop title even if
+                # the index still points at its original location.
+                for old_path, indexed in list(missing.items()):
+                    if old_path.name == path.name and indexed.get("id") == record.get("id"):
+                        record = {**record, **indexed, "rollout_path": str(path)}
+                        missing.pop(old_path)
+                        break
+                records[path] = record
+        except OSError as error:
+            _append_scan_warning(warnings, directory, error)
+    for path in missing:
+        _append_scan_warning(warnings, path, FileNotFoundError())
+    return [(record, path) for path, record in records.items()]
 
 
 def _thread_display_titles(codex_home: Path) -> dict[str, str]:

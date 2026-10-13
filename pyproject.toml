@@ -27,10 +27,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Silver-Ray/CodexBar"
-Repository = "https://github.com/Silver-Ray/CodexBar.git"
-Issues = "https://github.com/Silver-Ray/CodexBar/issues"
-Security = "https://github.com/Silver-Ray/CodexBar/security/policy"
+Homepage = "https://github.com/wxz12345/CodexBar"
+Repository = "https://github.com/wxz12345/CodexBar.git"
+Issues = "https://github.com/wxz12345/CodexBar/issues"
+Security = "https://github.com/wxz12345/CodexBar/security/policy"
 
 [dependency-groups]
 build = [

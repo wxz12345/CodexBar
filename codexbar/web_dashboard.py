@@ -13,6 +13,7 @@ import threading
 from typing import Any
 import urllib.parse
 import uuid
+import webbrowser
 
 from . import diagnostics, pricing, remote_usage, runtime, token_usage
 
@@ -222,6 +223,10 @@ class DashboardApi:
 
     def get_sources(self) -> list[dict]:
         return remote_usage.discover_sources()
+
+    def open_account_usage(self) -> bool:
+        """Open the official account page in the user's authenticated browser."""
+        return webbrowser.open("https://chatgpt.com/codex/settings/usage")
 
     def _usage_source(self, source_id: str):
         if source_id == "local":
@@ -458,9 +463,9 @@ def launch() -> None:
         "CodexBar Token 用量",
         dashboard_uri,
         js_api=api,
-        width=1720,
-        height=980,
-        min_size=(1600, 720),
+        width=1290,
+        height=735,
+        min_size=(1200, 540),
     )
     window.events.loaded += lambda: guard_dashboard_navigation(window, dashboard_uri)
     webview.start(private_mode=True)

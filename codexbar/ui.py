@@ -17,7 +17,7 @@ from tkinter import colorchooser, filedialog, font as tkfont, messagebox
 from types import SimpleNamespace
 
 from . import __version__
-from . import config, diagnostics, dpi, pricing, runtime, taskbar, token_usage, tray
+from . import config, diagnostics, dpi, pricing, remote_usage, runtime, taskbar, token_usage, tray
 from .credentials import (
     AuthRequiredError,
     CREDENTIAL_LOCK,
@@ -159,6 +159,8 @@ class QuotaWidget:
         self._refresh_in_progress = False
         self._refresh_pending = False
         self._refresh_generation = 0
+        self._remote_usage_sources: dict[str, remote_usage.RemoteUsageSource] = {}
+        self._usage_source_status = self._usage_selection_status()
         self._closed = False
         self._restart_requested = False
         self._status_code: str | None = None
@@ -328,7 +330,8 @@ class QuotaWidget:
     def _restore_settings_snapshot(self, snapshot: dict[str, object]) -> None:
         """取消设置时恢复打开窗口前的任务栏外观。"""
 
-        self.settings.update(snapshot)
+        # Source selection is independent of the display-settings preview.
+        self.settings.update({key: value for key, value in snapshot.items() if key != "usage_source"})
         set_colors(self.settings)
         self._apply_widget_geometry_from_settings()
 
@@ -386,14 +389,21 @@ class QuotaWidget:
         )
 
         if self._status_code:
+            usage = getattr(self, "data", {}).get("usage", {})
+            show_usage = not compact and (usage.get("tokens", "--") != "--"
+                                         or getattr(self, "_usage_source_status", {}).get("remote"))
             canvas.create_text(
-                width / 2,
+                self._px(9) if show_usage else width / 2,
                 height / 2,
                 text=self._status_code if compact else f"CodexBar {self._status_code}",
-                anchor="center",
+                anchor="w" if show_usage else "center",
                 fill=config.LOW,
                 font=self.f_status,
             )
+            if show_usage:
+                for y, text in ((height * 0.28, self._usage_token_text(usage["tokens"])), (height * 0.72, usage.get("cost", "$--"))):
+                    canvas.create_text(width - self._px(10), round(y), text=text,
+                                       anchor="e", fill=ordinary_fg, font=self.f_row_stat)
             return
 
         rows = self.data.get("rows", {})
@@ -424,6 +434,15 @@ class QuotaWidget:
             )
             if compact:
                 continue
+            stat_text = usage.get("tokens") if key == "h" else usage.get("cost")
+            if key == "h":
+                stat_text = self._usage_token_text(stat_text or "--")
+            if getattr(self, "_usage_source_status", {}).get("remote"):
+                available = width - self._px(98) - self.f_row_stat.measure(stat_text or "--")
+                if self.f_row_reset.measure(reset_text) > available:
+                    while reset_text and self.f_row_reset.measure(reset_text + "…") > available:
+                        reset_text = reset_text[:-1]
+                    reset_text = reset_text + "…" if reset_text else ""
             canvas.create_text(
                 self._px(82),
                 round(y),
@@ -432,7 +451,6 @@ class QuotaWidget:
                 fill=ordinary_fg,
                 font=self.f_row_reset,
             )
-            stat_text = usage.get("tokens") if key == "h" else usage.get("cost")
             canvas.create_text(
                 width - self._px(10),
                 round(y),
@@ -568,6 +586,12 @@ class QuotaWidget:
             amounts = [self._status_code]
         elif getattr(self, "_stale_status", None):
             amounts.append(self._stale_description())
+        source = getattr(self, "_usage_source_status", self._usage_selection_status())
+        amounts.append(f"用量来源：{source['label']}")
+        if source.get("loading"):
+            amounts.append("正在读取")
+        elif source.get("error"):
+            amounts.append(source["error"])
         self._tray_entry.show("CodexBar " + " / ".join(amounts))
 
     def _stale_labels(self) -> tuple[str, str]:
@@ -582,7 +606,10 @@ class QuotaWidget:
 
     def _reset_quota_data(self) -> None:
         """Forget old-account data and its freshness whenever login changes."""
+        usage = getattr(self, "data", {}).get("usage")
         self.data = self._empty_data()
+        if usage is not None:
+            self.data["usage"] = usage
         self._last_success_at = None
         self._stale_status = None
         self._status_code = None
@@ -645,6 +672,7 @@ class QuotaWidget:
             label="Token 用量...",
             command=self._menu_command(self.open_usage_dashboard),
         )
+        self._add_usage_source_menu(menu, menu_font)
         menu.add_command(
             label="打开错误日志...",
             command=self._menu_command(self.open_error_log),
@@ -721,6 +749,92 @@ class QuotaWidget:
             set_active_account(account_id)
         self._reset_quota_data()
         self.refresh_async()
+
+    def _usage_selection_status(self) -> dict:
+        source_id = getattr(self, "settings", {}).get("usage_source", "local")
+        return {"id": source_id, "label": "本机" if source_id == "local" else source_id[4:],
+                "remote": source_id != "local", "loading": False, "stale": False, "error": ""}
+
+    def _add_usage_source_menu(self, menu, menu_font) -> None:
+        source_menu = tk.Menu(menu, tearoff=0, font=menu_font)
+        selected = self.settings.get("usage_source", "local")
+        sources = remote_usage.discover_sources()
+        current = next((source for source in sources if source["id"] == selected), None)
+        label = current["label"] if current else self._usage_selection_status()["label"]
+        for source in sources:
+            source_label = ("服务器：" if source.get("remote") else "") + source["label"]
+            source_menu.add_command(
+                label=("✓ " if source["id"] == selected else "") + source_label,
+                command=self._menu_command(lambda source_id=source["id"]: self._switch_usage_source(source_id)),
+            )
+        if current is None:
+            source_menu.add_command(label=f"✓ {label}（配置中未找到）", state="disabled")
+        status = getattr(self, "_usage_source_status", {})
+        if status.get("loading") or status.get("error"):
+            source_menu.add_separator()
+            source_menu.add_command(label="正在读取…" if status.get("loading") else status["error"], state="disabled")
+        menu.add_cascade(label=f"用量来源：{label}", menu=source_menu)
+
+    def _switch_usage_source(self, source_id: str) -> None:
+        if source_id == self.settings.get("usage_source", "local"):
+            return
+        source = next((item for item in remote_usage.discover_sources() if item["id"] == source_id), None)
+        if source is None:
+            return
+        previous = self.settings
+        current = {**previous, "usage_source": source_id}
+        # Persist the source without committing a display editor's live preview.
+        self.settings = {**config.load_config(), "usage_source": source_id}
+        if not self._persist_settings(self.root):
+            self.settings = previous
+            return
+        self.settings = current
+        self._usage_source_status = {**self._usage_selection_status(), "label": source["label"], "loading": True}
+        # Clear the previous device's numbers before any background result arrives.
+        self.data["usage"] = {"tokens": "--", "cost": "$--"}
+        self.refresh_async()
+
+    def _usage_token_text(self, text: str) -> str:
+        status = getattr(self, "_usage_source_status", {})
+        if not status.get("remote"):
+            return text
+        if status.get("loading"):
+            return "远程 …"
+        if status.get("error") and text == "--":
+            return "SSH ERR"
+        return f"远程 {text}"
+
+    def _collect_selected_usage(self) -> tuple[token_usage.TokenUsageData | None, dict]:
+        status = self._usage_selection_status()
+        if not status["remote"]:
+            try:
+                return token_usage.collect_today_usage(), status
+            except Exception as error:
+                diagnostics.log_exception("token_usage", error)
+                status["error"] = "本机日志读取失败"
+                return None, status
+        try:
+            sources = getattr(self, "_remote_usage_sources", None)
+            if sources is None:
+                sources = self._remote_usage_sources = {}
+            source_id = status["id"]
+            if source_id not in sources:
+                item = next((item for item in remote_usage.discover_sources() if item["id"] == source_id), None)
+                if item is None or not item.get("remote"):
+                    raise remote_usage.RemoteUsageError("未找到所选服务器，请检查 SSH 连接配置")
+                sources[source_id] = remote_usage.RemoteUsageSource(source_id[4:], item["label"])
+            source = sources[source_id]
+            usage = source.collect_today_usage()
+            status.update(source.status())
+            return usage, status
+        except Exception as error:
+            diagnostics.log_exception("remote_token_usage", error)
+            status["error"] = str(error) if isinstance(error, remote_usage.RemoteUsageError) else "服务器用量读取失败"
+            return None, status
+
+    def _close_usage_sources(self) -> None:
+        for source in getattr(self, "_remote_usage_sources", {}).copy().values():
+            source.close()
 
     def _clear_current_account(self) -> None:
         confirmed = messagebox.askyesno(
@@ -852,6 +966,9 @@ class QuotaWidget:
                 self.root.after_cancel(callback_id)
         except (tk.TclError, RuntimeError, TypeError):
             pass
+        if getattr(self, "_remote_usage_sources", {}):
+            # An in-flight SSH read holds the source lock; never wait on it in Tk.
+            threading.Thread(target=self._close_usage_sources, daemon=True).start()
         self.root.destroy()
 
     def open_settings(self) -> None:
@@ -1482,27 +1599,27 @@ class QuotaWidget:
             self._post_refresh_result(
                 generation, data, usage, code,
                 selected_accounts[0] if selected_accounts else None,
+                usage_status,
             )
 
         pricing.refresh_prices()
+        usage, usage_status = self._collect_selected_usage()
         try:
             data = fetch_quota(account_selected=selected_accounts.append)
-            try:
-                usage = token_usage.collect_today_usage()
-            except Exception as error:
-                diagnostics.log_exception("token_usage", error)
-                usage = None
             post(data, usage, None)
         except AuthRequiredError as error:
             diagnostics.log_exception("quota_refresh", error, status="AUTH")
-            post(None, None, "AUTH")
+            post(None, usage, "AUTH")
         except ReloginRequiredError as error:
             diagnostics.log_exception("quota_refresh", error, status="RELOGIN")
-            post(None, None, "RELOGIN")
+            post(None, usage, "RELOGIN")
         except Exception as error:
             code = error_status(error)
             diagnostics.log_exception("quota_refresh", error, status=code)
-            post(None, None, code)
+            post(None, usage, code)
+        finally:
+            if getattr(self, "_closed", False):
+                self._close_usage_sources()
 
     def _post_refresh_result(
         self,
@@ -1511,6 +1628,7 @@ class QuotaWidget:
         usage: token_usage.TokenUsageData | None,
         error_code: str | None,
         account_id: str | None = None,
+        usage_status: dict | None = None,
     ) -> None:
         """Marshal one worker result back to Tk unless shutdown has begun."""
 
@@ -1525,6 +1643,7 @@ class QuotaWidget:
                 usage,
                 error_code,
                 account_id,
+                usage_status,
             )
         except (tk.TclError, RuntimeError):
             return
@@ -1536,6 +1655,7 @@ class QuotaWidget:
         usage: token_usage.TokenUsageData | None,
         error_code: str | None,
         account_id: str | None = None,
+        usage_status: dict | None = None,
     ) -> None:
         """Apply only the newest result, then run one coalesced pending refresh."""
 
@@ -1544,6 +1664,8 @@ class QuotaWidget:
             return
 
         if generation == self._refresh_generation:
+            if usage_status is not None:
+                self._usage_source_status = usage_status
             if account_id is not None and account_id != getattr(self, "_quota_account_id", None):
                 # resolve_credentials can also select a new Desktop login, even
                 # when the user has not used this widget's account menu.
@@ -1551,6 +1673,8 @@ class QuotaWidget:
                 self._quota_account_id = account_id
             if error_code:
                 self._apply_error(error_code)
+                self.data["usage"] = self._usage_labels(usage)
+                self._redraw()
             elif data is not None:
                 self._apply(data, usage)
 
@@ -1575,6 +1699,20 @@ class QuotaWidget:
         self._last_success_at = time.time()
         self._stale_status = None
         diagnostics.log_event("quota_refresh_success")
+        self.data = {
+            "plan": data["plan"],
+            "rows": {
+                "h": {"remain": data["h_remain"], "reset": data["h_reset"]},
+                "w": {"remain": data["w_remain"], "reset": data["w_reset"]},
+            },
+            "usage": self._usage_labels(usage),
+        }
+        self._schedule_next(self.settings["refresh_minutes"])
+        self._position_at_taskbar()
+        self._redraw()
+
+    @staticmethod
+    def _usage_labels(usage: token_usage.TokenUsageData | None) -> dict[str, str]:
         token_text = token_usage.format_token_millions(
             usage["total_tokens"] if usage else 0
         )
@@ -1591,20 +1729,7 @@ class QuotaWidget:
                 token_text = f"~{token_text}"
             if cost_text != "$--" and not cost_text.startswith("~"):
                 cost_text = f"~{cost_text}"
-        self.data = {
-            "plan": data["plan"],
-            "rows": {
-                "h": {"remain": data["h_remain"], "reset": data["h_reset"]},
-                "w": {"remain": data["w_remain"], "reset": data["w_reset"]},
-            },
-            "usage": {
-                "tokens": token_text,
-                "cost": cost_text,
-            },
-        }
-        self._schedule_next(self.settings["refresh_minutes"])
-        self._position_at_taskbar()
-        self._redraw()
+        return {"tokens": token_text, "cost": cost_text}
 
     def _apply_error(self, code: str) -> None:
         if code in ("AUTH", "RELOGIN", "HTTP401", "HTTP403"):

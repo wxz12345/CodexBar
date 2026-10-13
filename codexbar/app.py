@@ -14,6 +14,12 @@ def main(argv: list[str] | None = None) -> None:
     """Start the single CodexBar taskbar widget instance."""
 
     argv = sys.argv[1:] if argv is None else argv
+    if len(argv) == 2 and argv[0] == "--self-test":
+        from .packaged_check import write_report
+
+        if not write_report(argv[1]):
+            raise SystemExit(1)
+        return
     if len(argv) == 2 and argv[0] == "--check-network":
         from .network_check import write_report
 

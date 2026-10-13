@@ -241,7 +241,7 @@ class ReleaseBuildContractTests(unittest.TestCase):
             "collect_licenses.py",
             "audit_release.py",
             "CodexBar-Windows-x64.zip",
-            "Get-FileHash",
+            "[System.Security.Cryptography.SHA256]::Create()",
             "GetFullPath",
             "Refusing to remove path outside the repository",
             ".sha256",
@@ -313,6 +313,29 @@ class ReleaseBuildContractTests(unittest.TestCase):
                 target.write_bytes(content)
                 (runtime / "DLLs" / target.name).write_bytes(content)
             self.assertEqual(len(audit.audit_release(release, runtime_root=runtime)), 2)
+
+    def test_conda_libraries_require_identical_reference_and_reject_secrets(self):
+        audit = self._load_release_audit()
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            release, runtime = base / "release", base / "conda"
+            release.mkdir()
+            self._make_minimal_release(release)
+            (release / "_internal").mkdir()
+            library = runtime / "Library" / "bin"
+            library.mkdir(parents=True)
+            original = library / "libssl-3-x64.dll"
+            bundled = release / "_internal" / original.name
+            content = b"MZ C:\\Users\\UpstreamBuilder\\openssl"
+            original.write_bytes(content)
+            bundled.write_bytes(content)
+            self.assertEqual(audit.audit_release(release, runtime_root=runtime), [])
+            bundled.write_bytes(content + b" changed")
+            self.assertEqual([f.kind for f in audit.audit_release(release, runtime_root=runtime)], ["private-path"])
+            content += b" sk-this-is-a-fake-but-secret-value"
+            original.write_bytes(content)
+            bundled.write_bytes(content)
+            self.assertEqual([f.kind for f in audit.audit_release(release, runtime_root=runtime)], ["credential-pattern"])
 
     def test_unchanged_runtime_binary_still_rejects_credentials(self):
         audit = self._load_release_audit()
@@ -430,7 +453,9 @@ class GitHubAutomationContractTests(unittest.TestCase):
         config_form = (self.root / required[3]).read_text(encoding="utf-8")
         self.assertIn("不要粘贴", bug_form)
         self.assertIn("access token", bug_form.lower())
-        self.assertIn("security/advisories/new", config_form)
+        security_policy = (self.root / ".github/SECURITY.md").read_text(encoding="utf-8")
+        self.assertIn("Report a vulnerability", security_policy)
+        self.assertNotIn("Silver-Ray/CodexBar/security", config_form)
 
 
 class PublicDocumentationContractTests(unittest.TestCase):
@@ -674,12 +699,14 @@ class DiagnosticsLoggingTests(unittest.TestCase):
 
         widget = object.__new__(ui.QuotaWidget)
         widget.root = FakeRoot()
-        with mock.patch.object(ui, "fetch_quota", side_effect=RuntimeError("boom")):
+        with mock.patch.object(ui, "fetch_quota", side_effect=RuntimeError("boom")), \
+                mock.patch.object(ui.pricing, "refresh_prices"), \
+                mock.patch.object(ui.token_usage, "collect_today_usage", return_value=None):
             with mock.patch.object(ui.diagnostics, "log_exception") as log_exception:
                 ui.QuotaWidget._refresh_worker(widget)
         log_exception.assert_called_once()
         self.assertEqual(log_exception.call_args.args[0], "quota_refresh")
-        self.assertEqual(widget.root.calls[0][-2:], ("ERR", None))
+        self.assertEqual(widget.root.calls[0][-3:-1], ("ERR", None))
 
     def test_open_error_log_creates_log_before_opening(self):
         widget = object.__new__(ui.QuotaWidget)
@@ -739,7 +766,7 @@ class DiagnosticsLoggingTests(unittest.TestCase):
 
         with open(script_path, encoding="utf-8-sig") as file:
             script = file.read()
-        self.assertIn("pyinstaller", script)
+        self.assertIn("pyinstaller", script.casefold())
         self.assertIn("CodexBar.spec", script)
         self.assertIn("dist\\CodexBar\\CodexBar.exe", script)
         self.assertIn("--frozen", script)
@@ -2358,7 +2385,7 @@ class CompactWidgetTests(unittest.TestCase):
             widget._position_at_taskbar()
             self.assertTrue(widget._tray_mode)
             widget.root.withdraw.assert_called_once()
-            entry.return_value.show.assert_called_once_with("CodexBar 5h 100% / 每周 76%")
+            entry.return_value.show.assert_called_once_with("CodexBar 5h 100% / 每周 76% / 用量来源：本机")
             widget._position_at_taskbar()
         self.assertFalse(widget._tray_mode)
         entry.return_value.hide.assert_called_once()
@@ -3997,9 +4024,9 @@ class UsageDashboardFormattingTests(unittest.TestCase):
             web_dashboard.launch()
 
         kwargs = fake_webview.create_window.call_args.kwargs
-        self.assertEqual(kwargs["width"], 1720)
-        self.assertEqual(kwargs["height"], 980)
-        self.assertEqual(kwargs["min_size"], (1600, 720))
+        self.assertEqual(kwargs["width"], 1290)
+        self.assertEqual(kwargs["height"], 735)
+        self.assertEqual(kwargs["min_size"], (1200, 540))
 
         asset_dir = os.path.join(os.path.dirname(__file__), "codexbar", "web_assets")
         css_path = os.path.join(
