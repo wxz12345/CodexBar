@@ -12,6 +12,9 @@ let dayRequestGeneration = 0;
 let periodRequestGeneration = 0;
 let chartResizeTimer = null;
 let loadRequestGeneration = 0;
+let sourceListGeneration = 0;
+let aggregateSettingsGeneration = 0;
+let aggregateSettingsBusy = false;
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 window.addEventListener("pywebviewready", async () => {
@@ -22,7 +25,9 @@ window.addEventListener("pywebviewready", async () => {
 });
 
 async function loadSources() {
+  const generation = ++sourceListGeneration;
   const sources = await window.pywebview.api.get_sources();
+  if (generation !== sourceListGeneration) return;
   const select = document.getElementById("sourceSelect");
   select.replaceChildren();
   sources.forEach((source) => {
@@ -43,17 +48,133 @@ async function loadInitial(refresh = false) {
   showLoading({
     state: "running",
     percent: 1,
-    stage: sourceId === "local" ? "连接本机 Codex 日志" : "连接 SSH 远程主机",
-    detail: sourceId === "local" ? "准备读取 SQLite 和 rollout" : "后台读取会话用量，最长等待 30 秒",
+    stage: sourceId === "aggregate"
+      ? "读取多个设备的 Codex 日志"
+      : sourceId === "local" ? "连接本机 Codex 日志" : "连接 SSH 远程主机",
+    detail: sourceId === "aggregate"
+      ? "正在读取本机和已选 SSH 设备的账本日志"
+      : sourceId === "local" ? "准备读取 SQLite 和 rollout" : "后台读取会话用量，最长等待 30 秒",
   });
   try {
     const starter = await window.pywebview.api.start_initial_load(sourceId, refresh);
     if (generation !== loadRequestGeneration) return;
     activeLoadJobId = starter.job_id;
-    await pollInitialLoad(starter.job_id);
+    await pollInitialLoad(starter.job_id, generation);
   } catch (error) {
     if (generation !== loadRequestGeneration) return;
     showLoadingError(error?.message || String(error || "加载失败"));
+  }
+}
+
+function invalidatePendingDataRequests() {
+  ++loadRequestGeneration;
+  activeLoadJobId = null;
+  ++dayRequestGeneration;
+  ++periodRequestGeneration;
+}
+
+async function openAggregateSettings() {
+  const dialog = document.getElementById("aggregateDialog");
+  const generation = ++aggregateSettingsGeneration;
+  aggregateSettingsBusy = false;
+  document.getElementById("aggregateSettingsError").textContent = "";
+  document.getElementById("aggregateSourceList").replaceChildren();
+  document.getElementById("aggregateSettingsLoading").hidden = false;
+  document.getElementById("aggregateSaveButton").disabled = true;
+  document.getElementById("aggregateCancelButton").disabled = false;
+  document.getElementById("aggregateDialogClose").disabled = false;
+  if (!dialog.open) dialog.showModal();
+
+  try {
+    const settings = await window.pywebview.api.get_aggregate_settings();
+    if (generation !== aggregateSettingsGeneration || !dialog.open) return;
+    renderAggregateSettings(settings);
+    document.getElementById("aggregateSettingsLoading").hidden = true;
+    document.getElementById("aggregateSaveButton").disabled = false;
+  } catch (error) {
+    if (generation !== aggregateSettingsGeneration || !dialog.open) return;
+    document.getElementById("aggregateSettingsLoading").hidden = true;
+    document.getElementById("aggregateSettingsError").textContent = error?.message || String(error || "读取汇总设备失败");
+  }
+}
+
+function renderAggregateSettings(settings) {
+  const list = document.getElementById("aggregateSourceList");
+  const selectedIds = new Set(settings?.selected_ids || []);
+  const sources = settings?.sources || [];
+  list.replaceChildren();
+  if (!sources.length) {
+    const empty = document.createElement("div");
+    empty.className = "aggregate-settings-empty";
+    empty.textContent = "没有可配置的设备";
+    list.appendChild(empty);
+    return;
+  }
+
+  sources.forEach((source) => {
+    const selected = selectedIds.has(source.id) || Boolean(source.selected);
+    const label = document.createElement("label");
+    label.className = `aggregate-source-option${source.available === false ? " unavailable" : ""}`;
+    const checkbox = document.createElement("input");
+    checkbox.className = "aggregate-choice";
+    checkbox.type = "checkbox";
+    checkbox.value = source.id;
+    checkbox.checked = selected;
+    checkbox.disabled = source.available === false && !selected;
+    const name = document.createElement("span");
+    name.className = "aggregate-source-name";
+    name.textContent = `${source.label || source.id}${source.remote ? " · SSH" : ""}`;
+    label.append(checkbox, name);
+    if (source.available === false) {
+      const status = document.createElement("span");
+      status.className = "aggregate-source-note";
+      status.textContent = selected ? "SSH 配置不可用，可取消选择" : "SSH 配置不可用";
+      label.appendChild(status);
+    }
+    list.appendChild(label);
+  });
+}
+
+async function saveAggregateSettings() {
+  if (aggregateSettingsBusy) return;
+  const ids = Array.from(document.querySelectorAll("#aggregateSourceList .aggregate-choice:checked"))
+    .map((checkbox) => checkbox.value);
+  const errorNode = document.getElementById("aggregateSettingsError");
+  errorNode.textContent = "";
+  if (!ids.length) {
+    errorNode.textContent = "至少选择一台设备。";
+    return;
+  }
+
+  const generation = aggregateSettingsGeneration;
+  aggregateSettingsBusy = true;
+  invalidatePendingDataRequests();
+  ++sourceListGeneration;
+  document.getElementById("aggregateSaveButton").disabled = true;
+  document.getElementById("aggregateCancelButton").disabled = true;
+  document.getElementById("aggregateDialogClose").disabled = true;
+  try {
+    await window.pywebview.api.save_aggregate_sources(ids);
+    if (generation !== aggregateSettingsGeneration) return;
+    state.sourceId = "aggregate";
+    const select = document.getElementById("sourceSelect");
+    if (!Array.from(select.options).some((option) => option.value === "aggregate")) {
+      const option = document.createElement("option");
+      option.value = "aggregate";
+      option.textContent = "全部已选设备（汇总）";
+      select.appendChild(option);
+    }
+    select.value = "aggregate";
+    aggregateSettingsBusy = false;
+    document.getElementById("aggregateDialog").close();
+    await loadInitial(true);
+  } catch (error) {
+    if (generation !== aggregateSettingsGeneration) return;
+    aggregateSettingsBusy = false;
+    document.getElementById("aggregateSaveButton").disabled = false;
+    document.getElementById("aggregateCancelButton").disabled = false;
+    document.getElementById("aggregateDialogClose").disabled = false;
+    errorNode.textContent = error?.message || String(error || "保存汇总设备失败");
   }
 }
 
@@ -69,6 +190,20 @@ function bindActions() {
   document.getElementById("refreshButton").addEventListener("click", async () => {
     await loadSources();
     await loadInitial(true);
+  });
+  document.getElementById("aggregateSettingsButton").addEventListener("click", openAggregateSettings);
+  document.getElementById("aggregateSaveButton").addEventListener("click", saveAggregateSettings);
+  document.getElementById("aggregateCancelButton").addEventListener("click", () => {
+    if (!aggregateSettingsBusy) document.getElementById("aggregateDialog").close();
+  });
+  document.getElementById("aggregateDialogClose").addEventListener("click", () => {
+    if (!aggregateSettingsBusy) document.getElementById("aggregateDialog").close();
+  });
+  document.getElementById("aggregateDialog").addEventListener("cancel", (event) => {
+    if (aggregateSettingsBusy) event.preventDefault();
+  });
+  document.getElementById("aggregateDialog").addEventListener("close", () => {
+    if (!aggregateSettingsBusy) ++aggregateSettingsGeneration;
   });
   document.getElementById("loadingRetryButton").addEventListener("click", () => loadInitial(true));
   document.getElementById("sourceSelect").addEventListener("change", async (event) => {
@@ -102,10 +237,10 @@ function bindActions() {
   });
 }
 
-async function pollInitialLoad(jobId) {
+async function pollInitialLoad(jobId, generation) {
   while (true) {
     const status = await window.pywebview.api.get_load_status(jobId);
-    if (jobId !== activeLoadJobId) return;
+    if (generation !== loadRequestGeneration || jobId !== activeLoadJobId) return;
     showLoading(status);
     if (status.state === "done") {
       state.days = status.result?.days || [];
@@ -182,9 +317,65 @@ function renderSourceStatus() {
   const source = state.source;
   const node = document.getElementById("sourceStatus");
   const fetched = source?.fetched_at ? new Date(source.fetched_at * 1000).toLocaleString() : "";
-  node.classList.toggle("stale", Boolean(source?.stale));
+  node.classList.toggle("stale", Boolean(source?.stale || source?.incomplete));
+  const aggregate = source?.aggregate || source?.id === "aggregate";
+  const details = document.getElementById("aggregateStatusDetails");
+  details.hidden = !aggregate;
+  if (aggregate) {
+    const selectedCount = Number(source.selected_count || 0);
+    const freshCount = Number(source.fresh_count || 0);
+    const cachedCount = Number(source.cached_count || 0);
+    const failedCount = Number(source.failed_count || 0);
+    node.textContent = `数据来源：${source.label || "全部已选设备（汇总）"} · 已更新 ${freshCount}/${selectedCount}` +
+      `${cachedCount ? ` · 缓存 ${cachedCount}` : ""}${failedCount ? ` · 失败 ${failedCount}` : ""}` +
+      `${fetched ? ` · 更新时间 ${fetched}` : ""}${source.incomplete ? " · 数据可能不完整" : ""}`;
+    renderAggregateSourceDetails(source);
+    return;
+  }
+
   node.textContent = `数据来源：${source?.label || "本机"}${source?.remote ? " · SSH" : ""}` +
     `${fetched ? ` · 上次读取 ${fetched}` : ""}${source?.stale ? ` · ${source.error}；显示缓存` : ""}`;
+}
+
+function renderAggregateSourceDetails(source) {
+  const list = document.getElementById("aggregateDeviceStatusList");
+  const warnings = document.getElementById("aggregateWarnings");
+  list.replaceChildren();
+  warnings.replaceChildren();
+  (source.devices || []).forEach((device) => {
+    const row = document.createElement("div");
+    row.className = `aggregate-device-status ${device.state || "failed"}`;
+    const label = document.createElement("span");
+    label.className = "aggregate-device-label";
+    label.textContent = `${device.label || device.id} · ${aggregateDeviceStateLabel(device.state)}`;
+    const fetched = document.createElement("span");
+    fetched.className = "aggregate-device-fetched";
+    fetched.textContent = device.fetched_at ? new Date(device.fetched_at * 1000).toLocaleString() : "";
+    row.append(label, fetched);
+    if (device.error) {
+      const error = document.createElement("span");
+      error.className = "aggregate-device-error";
+      error.textContent = device.error;
+      row.appendChild(error);
+    }
+    list.appendChild(row);
+  });
+  (source.warnings || []).forEach((warning) => {
+    const item = document.createElement("div");
+    item.textContent = String(warning);
+    warnings.appendChild(item);
+  });
+  if (source.error) {
+    const item = document.createElement("div");
+    item.textContent = String(source.error);
+    warnings.appendChild(item);
+  }
+}
+
+function aggregateDeviceStateLabel(state) {
+  if (state === "fresh") return "新鲜";
+  if (state === "cached") return "缓存";
+  return "失败";
 }
 
 function renderAll() {

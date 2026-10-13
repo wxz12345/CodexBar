@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+
 import datetime as dt
 import json
 import os
@@ -153,6 +155,7 @@ class RemoteUsageSource:
         self._attempted_at = 0.0
         self._warnings: list[str] = []
         self._error = ""
+        self._snapshot: dict | None = None
 
     def refresh(self, force: bool = False) -> None:
         with self._lock:
@@ -173,6 +176,7 @@ class RemoteUsageSource:
                 return
             previous = self._temporary
             self._temporary = temporary
+            self._snapshot = snapshot
             self._warnings = warnings
             self._fetched_at = time.time()
             self._error = ""
@@ -183,6 +187,12 @@ class RemoteUsageSource:
         with self._lock:
             return {"id": "ssh:" + self.alias, "label": self.label, "remote": True,
                     "fetched_at": self._fetched_at, "stale": bool(self._error), "error": self._error}
+
+    def snapshot(self, force: bool = False) -> dict:
+        """Return sanitized accounting records, retaining the last good read."""
+        with self._lock:
+            self.refresh(force=force)
+            return copy.deepcopy(self._snapshot)
 
     def _collect(self, method, *args, **kwargs):
         with self._lock:
@@ -212,3 +222,4 @@ class RemoteUsageSource:
             if self._temporary is not None:
                 self._temporary.cleanup()
                 self._temporary = None
+            self._snapshot = None

@@ -58,6 +58,7 @@ button:hover {
 }
 
 .source-picker select {
+  min-width: 0;
   max-width: 230px;
   padding: 8px 12px;
   border: 1px solid var(--line);
@@ -67,12 +68,60 @@ button:hover {
   font: inherit;
 }
 
+.compact-button {
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
 #sourceStatus {
   margin-top: 6px;
   max-width: 760px;
 }
 
 #sourceStatus.stale {
+  color: var(--amber);
+}
+
+.aggregate-status-details {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.aggregate-status-details summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.aggregate-device-status-list,
+.aggregate-warnings {
+  display: grid;
+  gap: 3px;
+  margin-top: 5px;
+}
+
+.aggregate-device-status {
+  display: grid;
+  grid-template-columns: minmax(150px, max-content) minmax(0, 1fr);
+  gap: 3px 12px;
+  align-items: baseline;
+}
+
+.aggregate-device-status.fresh .aggregate-device-label { color: var(--cyan); }
+.aggregate-device-status.cached .aggregate-device-label { color: var(--amber); }
+.aggregate-device-status.failed .aggregate-device-label { color: var(--coral); }
+
+.aggregate-device-fetched,
+.aggregate-device-error {
+  overflow-wrap: anywhere;
+}
+
+.aggregate-device-error {
+  grid-column: 1 / -1;
+  color: var(--coral);
+}
+
+.aggregate-warnings {
   color: var(--amber);
 }
 
@@ -235,6 +284,18 @@ h1 {
 .period-tabs {
   display: flex;
   gap: 10px;
+}
+
+.actions {
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.topbar > div:first-child {
+  min-width: 0;
+  flex: 1 1 460px;
 }
 
 .layout {
@@ -664,6 +725,135 @@ h1 {
   height: 100%;
   color: var(--muted);
   font: 12px "Cascadia Mono", Consolas, monospace;
+}
+
+.aggregate-dialog {
+  width: min(500px, calc(100vw - 36px));
+  max-height: min(620px, calc(100vh - 36px));
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.aggregate-dialog::backdrop {
+  background: rgba(7, 9, 10, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.aggregate-dialog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.aggregate-dialog-head h2 {
+  margin: 5px 0 0;
+  font: 700 22px "Bahnschrift SemiBold", "Segoe UI", sans-serif;
+}
+
+.icon-button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.aggregate-dialog-note,
+.aggregate-settings-loading,
+.aggregate-settings-empty {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.aggregate-dialog-note {
+  margin: 14px 0;
+}
+
+.aggregate-source-list {
+  display: grid;
+  gap: 7px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.aggregate-source-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: center;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(11, 13, 15, 0.28);
+  cursor: pointer;
+}
+
+.aggregate-source-option:has(input:checked) {
+  border-color: rgba(118, 217, 230, 0.58);
+  background: rgba(118, 217, 230, 0.07);
+}
+
+.aggregate-source-option input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--cyan);
+}
+
+.aggregate-source-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.aggregate-source-note {
+  grid-column: 2;
+  color: var(--amber);
+  font-size: 11px;
+}
+
+.aggregate-source-option input:disabled {
+  opacity: 0.45;
+}
+
+.aggregate-settings-error {
+  min-height: 18px;
+  margin-top: 8px;
+  color: var(--coral);
+  font-size: 12px;
+}
+
+.aggregate-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.aggregate-dialog button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.primary-button {
+  border-color: rgba(118, 217, 230, 0.7);
+  background: var(--cyan);
+  color: #0b0d0f;
+}
+
+.primary-button:hover {
+  background: #a9edf3;
 }
 
 @media (max-width: 1500px) {

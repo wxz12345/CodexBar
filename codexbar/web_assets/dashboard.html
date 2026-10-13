@@ -32,7 +32,12 @@
         <div id="pricingStatus" class="eyebrow">API 等价估算 · 官网价格每日更新</div>
         <h1>Token 用量账本</h1>
         <div id="sourceStatus" class="muted" aria-live="polite">数据来源：本机</div>
-        <div class="muted">Token 仅覆盖所选设备可读取的日志，不按账号归属；其他设备与云端任务未纳入。</div>
+        <div class="muted">Token 覆盖本机、所选 SSH 设备的可读取日志，不自动核验账号归属；其他设备与云端任务未纳入。</div>
+        <details id="aggregateStatusDetails" class="aggregate-status-details" hidden>
+          <summary>设备明细</summary>
+          <div id="aggregateDeviceStatusList" class="aggregate-device-status-list"></div>
+          <div id="aggregateWarnings" class="aggregate-warnings"></div>
+        </details>
       </div>
       <div class="actions">
         <label class="source-picker" for="sourceSelect">数据来源
@@ -40,6 +45,7 @@
             <option value="local">本机</option>
           </select>
         </label>
+        <button id="aggregateSettingsButton" class="compact-button" type="button">汇总设备</button>
         <button id="accountUsageButton" type="button">官方账号用量</button>
         <button id="todayButton" type="button">今天</button>
         <button id="refreshButton" type="button">刷新</button>
@@ -104,6 +110,23 @@
       <div id="chart" class="chart"></div>
     </section>
   </main>
+  <dialog id="aggregateDialog" class="aggregate-dialog" aria-labelledby="aggregateDialogTitle">
+    <div class="aggregate-dialog-head">
+      <div>
+        <div class="eyebrow">DEVICE SELECTION</div>
+        <h2 id="aggregateDialogTitle">汇总设备</h2>
+      </div>
+      <button id="aggregateDialogClose" class="icon-button" type="button" aria-label="关闭">×</button>
+    </div>
+    <p class="aggregate-dialog-note">请仅选择使用同一账号的设备；不自动核验账号归属。</p>
+    <div id="aggregateSettingsLoading" class="aggregate-settings-loading">正在读取已保存的设备</div>
+    <div id="aggregateSourceList" class="aggregate-source-list"></div>
+    <div id="aggregateSettingsError" class="aggregate-settings-error" role="alert" aria-live="polite"></div>
+    <div class="aggregate-dialog-actions">
+      <button id="aggregateCancelButton" type="button">取消</button>
+      <button id="aggregateSaveButton" class="primary-button" type="button" disabled>保存并汇总</button>
+    </div>
+  </dialog>
   <script src="dashboard.js"></script>
 </body>
 </html>

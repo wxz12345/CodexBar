@@ -34,12 +34,14 @@ Get-Content .\CodexBar-Windows-x64.zip.sha256
 - **Account quota:** server quota windows, remaining percentages, reset times, and multiple cached ChatGPT OAuth accounts.
 - **Taskbar usage:** today's tokens and estimated cost for the selected local or SSH source; a compact view or tray icon when space is limited.
 - **Dashboard:** daily input, cached input, output, reasoning, conversation rankings, and weekly/monthly/yearly trends.
-- **SSH sources:** select a remote device in the taskbar or dashboard and view its logs separately.
+- **Multi-device ledger:** select this PC and SSH hosts in **Aggregate devices** to combine history, trends, and conversation rankings.
+- **SSH sources:** the taskbar shows one source at a time; the ledger can show one SSH host or aggregate selected devices.
 - **Customization:** width, font, colors, refresh interval, model prices, and high DPI support.
 
 Click for the dashboard and double-click for settings. In the taskbar or tray icon's right-click menu, use **Usage source** to select this PC or a discovered SSH host; the taskbar remembers its selection. The dashboard has its own independent source selector and does not change the taskbar source.
+The dashboard starts with this PC and does not connect to SSH automatically. Click **“汇总设备” (Aggregate devices)**, select this PC and SSH hosts that you believe use the same account, and save; the dashboard switches to **“全部已选设备（汇总）” (All selected devices (aggregate))**. The selection is stored in `aggregate_sources.json` beside `config.json`, independently of the taskbar source. You are responsible for confirming account ownership; CodexBar does not verify or filter device logs by OAuth account.
 Existing ChatGPT OAuth logins are detected automatically; if `AUTH` appears, complete Codex login and refresh.
-Usage collection remains independent of quota authentication and network requests. If the selected remote source cannot be read on its first attempt, the taskbar shows it as unavailable instead of substituting local data or zero.
+Log collection remains independent of quota authentication and network requests: the taskbar uses its single source, and the dashboard uses its current source or aggregate selection. If a remote source cannot be read on its first attempt, it is shown as unavailable instead of substituting local data or zero.
 
 ## Scope and accuracy
 
@@ -48,17 +50,20 @@ Usage collection remains independent of quota authentication and network request
 | Data | Current coverage |
 | --- | --- |
 | Account quota | Server quota for the selected OAuth account |
-| Taskbar tokens | Readable Codex logs from the selected local or SSH source; one source at a time, across accounts |
-| Dashboard tokens | Readable logs on the selected local or SSH device, viewed separately |
-| Account-wide device and cloud tokens | Not implemented; other devices and personal Plus/Pro cloud tasks are not automatically aggregated |
+| Taskbar tokens | Readable Codex logs from the selected local or single SSH source; one source at a time, across accounts |
+| Dashboard tokens | Local by default; can aggregate selected local and SSH logs, with the same combined result for history, trends, and rankings |
+| Full account token total | Not implemented; aggregation covers only selected readable logs, excluding unselected devices, unrecorded logs, and cloud tasks |
 
 Discovery respects `CODEX_HOME`, defaulting to `~/.codex`. It combines SQLite indexes with `sessions` and `archived_sessions` scans, including unindexed logs, relative paths, moved archived logs, and duplicate file discovery.
 
 - Cumulative `token_count` snapshots become increments; identifiable replay boundaries help handle copied history.
 - Cached input belongs to input and reasoning belongs to output. Neither is added twice.
 - Dates use the Windows machine's local timezone, including for SSH sources.
+- Cross-device events are deduplicated by session identifier, UTC time, and usage. Events without a reliable identifier are retained and may produce a duplicate warning.
 - Detected missing or unreadable records mark results incomplete. This cannot detect every unrecorded task.
 - Deleted, inaccessible, or unrecorded logs and unselected devices or cloud tasks cannot be reconstructed or inferred.
+
+Aggregate status shows the number of fresh devices, cached or failed devices, and the update time. Failed devices are never counted as zero; if every selected device fails and no cache is available, the ledger reports the source as unavailable.
 
 Dollar values are public API-price estimates, **not subscription bills or actual charges**. Prices support daily public-document updates, offline caching, and manual overrides. Unknown models still contribute tokens, but their cost may be unavailable.
 
@@ -72,7 +77,7 @@ Windows OpenSSH, working noninteractive authentication, and remote Python 3.8+ w
 Hosts come from Codex Desktop connections and `~/.ssh/config` aliases. Authentication and host-key verification follow your OpenSSH configuration.
 
 The probe reads remote data without installing anything. It returns accounting events and metadata, excluding message bodies, tool output, and credentials.
-The taskbar and dashboard use the same read-only probe, cache, and timeout rules. Remote taskbar token counts are prefixed with **Remote**; the source menu and tray tooltip show the selected source and its status or errors. Disconnections retain a cached snapshot and mark it incomplete; a failed first read shows as unavailable. The taskbar selection is saved in the local `usage_source` config setting, independently of the dashboard selector.
+The taskbar and dashboard use the same read-only probe, cache, and timeout rules. Remote taskbar token counts are prefixed with **Remote**; the source menu and tray tooltip show the selected source and its status or errors. Disconnections retain a cached snapshot and mark it incomplete; a failed first read shows as unavailable. The taskbar selection is saved in the local `usage_source` config setting; ledger device selections are stored in `aggregate_sources.json` beside `config.json` and do not change the taskbar.
 
 ## Privacy and local data
 

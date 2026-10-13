@@ -8,12 +8,15 @@ CodexBar 是完全在用户 Windows 电脑上运行的开源桌面工具。项�
 CodexBar 可能只读访问以下数据：
 
 - `$CODEX_HOME/auth.json`（未设置时为 `~/.codex/auth.json`）：检测完整的 ChatGPT OAuth 登录。该文件不会被修改。
-- Codex SQLite 和 rollout JSONL：任务栏或账本选择本机来源时，统计本机 Codex 对话产生的 token 用量。
+- Codex SQLite 和 rollout JSONL：任务栏选择本机来源，或账本选择本机及汇总来源时，统计本机 Codex 对话产生的 token 用量。
 - 用户主动设置的模型价格、自定义 CA 证书和显示配置。
 
 Token 日志来源遵循 `CODEX_HOME`，默认 `~/.codex`，包括数据库索引和
-`sessions` / `archived_sessions` 目录。任务栏和账本每次只统计各自选定的本机或 SSH 来源；
-日志不按当前 OAuth 账号归属，也不自动汇总其他设备或云端任务。
+`sessions` / `archived_sessions` 目录。任务栏每次读取单个本机或 SSH 来源。账本默认读取本机；
+用户可通过“汇总设备”选择本机和 SSH 来源汇总日志，历史、趋势和排行使用同一结果。
+设备选择保存在与 `config.json` 同目录的 `aggregate_sources.json`，不改变任务栏来源。
+启动时账本默认读取本机，不自动连接 SSH。日志不会按当前 OAuth 账号归属或筛选；用户负责确认
+勾选的设备使用同一账号，CodexBar 不自动核验账号归属。未选设备、未记录日志和云端任务不包含在汇总中。
 
 Token 用量页面可能在本机显示对话标题、模型名称和工作目录末级名称。这些信息只在
 本地窗口中处理，不会由 CodexBar 上传。
@@ -21,11 +24,12 @@ Token 用量页面可能在本机显示对话标题、模型名称和工作目�
 ## SSH 远程读取
 
 用户在任务栏或账本选择远程数据源时，CodexBar 通过本机 OpenSSH、用户已有的 SSH 配置和密钥连接指定主机。
-主机列表从 Codex Desktop 的本地连接设置及 `~/.ssh/config` 读取；列出主机不会发起连接。
+主机列表从 Codex Desktop 的本地连接设置及 `~/.ssh/config` 读取；列出主机不会发起连接。账本启动时使用本机来源；只有在用户切换到 SSH 来源或汇总已选设备时才连接相应主机。
 远程 Python 脚本在内存中运行，只读打开远程 Codex SQLite 和 rollout，不安装程序或写入远程文件。
 
 通过加密 SSH 返回的数据限于 token 计数、时间戳、模型、会话 ID、标题、工作目录和识别回放所需的标记。
 用户消息仅保留用于计数的事件类型和时间戳；不会返回消息正文、工具输出、`auth.json` 或 OAuth 凭据。
+汇总跨设备事件时按 session 标识、UTC 时间和 usage 去重；缺少可靠标识的事件会保留并提示可能重复。
 读取数据仅用于本机统计，不发送给 OpenAI 或其他服务。
 
 远程统计数据在系统临时目录中保存为 CodexBar 自有的 SQLite 和精简 JSONL，以复用本机统计逻辑。
@@ -34,6 +38,7 @@ Token 用量页面可能在本机显示对话标题、模型名称和工作目�
 远程 SSH 认证和主机密钥校验遵循用户自己的 OpenSSH 配置，程序不改写 SSH 配置或私钥。
 任务栏来源保存在本机 `config.json` 的 `usage_source` 字段；账本的来源选择独立，修改它不会改变任务栏。
 任务栏首次读取远程来源失败时显示不可用；断线时若已有缓存则保留并标记不完整。
+账本汇总状态会列出新鲜、缓存和失败设备及更新时间。失败设备不会被当成零用量；若全部已选设备均失败且没有缓存，账本显示不可用。
 
 ## 本机写入
 
@@ -41,6 +46,7 @@ CodexBar 自有数据保存在 `%LOCALAPPDATA%\CodexBar`：
 
 - `credentials.dat`：使用 Windows DPAPI 当前用户作用域加密的 OAuth 账号缓存。
 - `config.json`：组件尺寸、颜色、字体、刷新间隔和任务栏来源别名 `usage_source`。
+- `aggregate_sources.json`：用户为账本汇总选择的本机和 SSH 来源；与任务栏来源独立。
 - `model_prices.json`：用户自定义模型价格。
 - `official_model_prices.json`：官网公开模型和价格的缓存。
 - `error.log` 与 `error.log.1`：经过脱敏并限制大小的诊断日志。

@@ -14,8 +14,9 @@ from typing import Any
 import urllib.parse
 import uuid
 import webbrowser
+import weakref
 
-from . import diagnostics, pricing, remote_usage, runtime, token_usage
+from . import aggregate_usage, diagnostics, pricing, remote_usage, runtime, token_usage
 
 
 ASSET_DIR = runtime.resource_path("codexbar", "web_assets")
@@ -218,20 +219,55 @@ class DashboardApi:
         self._jobs: dict[str, dict[str, Any]] = {}
         self._jobs_lock = threading.Lock()
         self._active_job_id: str | None = None
-        self._sources_lock = threading.Lock()
+        self._sources_lock = threading.RLock()
         self._remote_sources: dict[str, remote_usage.RemoteUsageSource] = {}
+        self._aggregate_source = None
+        self._retired_aggregates = weakref.WeakSet()
+        self._source_context = threading.local()
 
     def get_sources(self) -> list[dict]:
-        return remote_usage.discover_sources()
+        return [*remote_usage.discover_sources(),
+                {"id": "aggregate", "label": "全部已选设备（汇总）", "remote": False, "aggregate": True}]
+
+    def get_aggregate_settings(self) -> dict:
+        selected = aggregate_usage.load_selected_sources()
+        sources = remote_usage.discover_sources()
+        known = {source["id"] for source in sources}
+        sources = [{**source, "selected": source["id"] in selected, "available": True} for source in sources]
+        sources.extend({"id": source_id, "label": source_id[4:], "remote": True,
+                        "selected": True, "available": False} for source_id in selected if source_id not in known)
+        return {"sources": sources, "selected_ids": selected}
+
+    def save_aggregate_sources(self, source_ids: list[str]) -> dict:
+        selected = aggregate_usage._validate_selection(source_ids)
+        with self._sources_lock:
+            allowed = {source["id"] for source in remote_usage.discover_sources()} | set(aggregate_usage.load_selected_sources())
+            if any(source_id not in allowed for source_id in selected):
+                raise ValueError("设备列表已变化，请重新打开汇总设备选择")
+            aggregate_usage.save_selected_sources(selected)
+            # Running loads retain their immutable selection until completion.
+            if self._aggregate_source is not None:
+                self._retired_aggregates.add(self._aggregate_source)
+                self._aggregate_source = None
+        return self.get_aggregate_settings()
 
     def open_account_usage(self) -> bool:
         """Open the official account page in the user's authenticated browser."""
         return webbrowser.open("https://chatgpt.com/codex/settings/usage")
 
     def _usage_source(self, source_id: str):
+        if getattr(self._source_context, "source_id", None) == source_id:
+            return self._source_context.source
         if source_id == "local":
             return self.token_usage
         with self._sources_lock:
+            if source_id == "aggregate":
+                selected = aggregate_usage.load_selected_sources()
+                if self._aggregate_source is None or self._aggregate_source.source_ids != tuple(selected):
+                    if self._aggregate_source is not None:
+                        self._retired_aggregates.add(self._aggregate_source)
+                    self._aggregate_source = aggregate_usage.AggregateUsageSource(selected, self._usage_source)
+                return self._aggregate_source
             if source_id not in self._remote_sources:
                 source = next((item for item in self.get_sources() if item["id"] == source_id), None)
                 if source is None or not source.get("remote"):
@@ -247,9 +283,10 @@ class DashboardApi:
     def start_initial_load(self, source_id: str = "local", refresh: bool = False) -> dict[str, str]:
         """Start a background dashboard load and return a pollable job id."""
 
+        source = self._usage_source(source_id)
         with self._jobs_lock:
             for existing_id, active in self._jobs.items():
-                if active.get("state") == "running" and active.get("source_id", "local") == source_id:
+                if active.get("state") == "running" and active.get("source_id", "local") == source_id and active.get("source_key") == id(source):
                     self._active_job_id = existing_id
                     return {"job_id": existing_id}
             job_id = uuid.uuid4().hex
@@ -262,10 +299,11 @@ class DashboardApi:
                 "result": None,
                 "error": "",
                 "source_id": source_id,
+                "source_key": id(source),
             }
         thread = threading.Thread(
             target=self._run_initial_load_job,
-            args=(job_id, source_id, refresh),
+            args=(job_id, source_id, refresh, source),
             daemon=True,
         )
         thread.start()
@@ -287,11 +325,14 @@ class DashboardApi:
                 }
             return status.copy()
 
-    def _run_initial_load_job(self, job_id: str, source_id: str = "local", refresh: bool = False) -> None:
+    def _run_initial_load_job(self, job_id: str, source_id: str = "local", refresh: bool = False, source_override=None) -> None:
         try:
-            source = self._usage_source(source_id)
+            source = source_override or self._usage_source(source_id)
+            self._source_context.source_id = source_id
+            self._source_context.source = source
             if source_id != "local":
-                self._update_load_progress(job_id, 3, "读取 SSH 远程会话", "连接主机并读取 token 记录（最长 30 秒）")
+                stage = "汇总所选设备" if source_id == "aggregate" else "读取 SSH 远程会话"
+                self._update_load_progress(job_id, 3, stage, "后台读取会话记录，SSH 每台最长等待 30 秒")
                 source.refresh(force=refresh)
             result = self._build_initial_state(job_id=job_id, source_id=source_id)
             self._set_job_status(
@@ -314,6 +355,16 @@ class DashboardApi:
                 result=None,
                 error=diagnostics.sanitize_text(str(error)),
             )
+        finally:
+            self._source_context.__dict__.clear()
+
+    def close(self) -> None:
+        with self._sources_lock:
+            sources = [*self._remote_sources.values(), *self._retired_aggregates]
+            if self._aggregate_source is not None:
+                sources.append(self._aggregate_source)
+        for source in sources:
+            source.close()
 
     def get_initial_state(self, source_id: str = "local") -> dict[str, Any]:
         return self._build_initial_state(source_id=source_id)
@@ -357,24 +408,26 @@ class DashboardApi:
         progress_callback=None,
     ) -> dict[str, Any]:
         target = dt.date.fromisoformat(date)
-        data = self._usage_source(source_id).collect_usage_days(days=1, anchor_date=target, use_cache=False)
+        source = self._usage_source(source_id)
+        data = source.collect_usage_days(days=1, anchor_date=target, use_cache=False)
         buckets = data.get("buckets", [])
         conversations = [
             build_conversation_row(row)
-            for row in self._collect_thread_usage_for_day(target, progress_callback, source_id)
+            for row in self._collect_thread_usage_for_day(target, progress_callback, source_id, source)
         ]
         if not buckets:
             receipt = build_receipt({"start_date": target})
         else:
             receipt = build_receipt(buckets[-1])
         receipt["conversations"] = conversations
-        receipt["source"] = self._source_status(source_id)
+        receipt["source"] = self._source_status(source_id) if source_id == "local" else source.status()
         return receipt
 
     def get_range(self, period: str, source_id: str = "local") -> dict[str, Any]:
         clean_period = period if period in ("week", "month", "year") else "week"
-        result = serialize_range(self._usage_source(source_id).collect_usage_range(clean_period))
-        result["source"] = self._source_status(source_id)
+        source = self._usage_source(source_id)
+        result = serialize_range(source.collect_usage_range(clean_period))
+        result["source"] = self._source_status(source_id) if source_id == "local" else source.status()
         return result
 
     def _get_initial_range(self, job_id: str | None, source_id: str = "local") -> dict[str, Any]:
@@ -383,8 +436,8 @@ class DashboardApi:
         self._update_load_progress(job_id, 94, "整理前端数据", "准备渲染页面")
         return data
 
-    def _collect_thread_usage_for_day(self, target: dt.date, progress_callback=None, source_id: str = "local"):
-        method = self._usage_source(source_id).collect_thread_usage_for_day
+    def _collect_thread_usage_for_day(self, target: dt.date, progress_callback=None, source_id: str = "local", source=None):
+        method = (source or self._usage_source(source_id)).collect_thread_usage_for_day
         parameters = inspect.signature(method).parameters
         if "progress_callback" in parameters:
             return method(target, use_cache=False, progress_callback=progress_callback)
@@ -468,7 +521,10 @@ def launch() -> None:
         min_size=(1200, 540),
     )
     window.events.loaded += lambda: guard_dashboard_navigation(window, dashboard_uri)
-    webview.start(private_mode=True)
+    try:
+        webview.start(private_mode=True)
+    finally:
+        api.close()
 
 
 def main() -> None:
